@@ -62,7 +62,7 @@ jobs:
           safety check -r requirements.txt --json > safety-report.json || true
       
       - name: Upload security reports
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: python-security-${{ matrix.component }}
           path: |
@@ -86,7 +86,7 @@ jobs:
           npm audit --json > npm-audit.json || true
       
       - name: Upload security report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: nodejs-security
           path: frontend/npm-audit.json
