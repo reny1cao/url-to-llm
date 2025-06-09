@@ -7,7 +7,7 @@ authors = ["URL to LLM Team"]
 [tool.poetry.dependencies]
 python = "^3.12"
 playwright = "^1.40.0"
-httpx = "^0.25.2"
+httpx = "^0.28.1"
 asyncpg = "^0.29.0"
 aioboto3 = "^12.0.0"
 redis = "^5.0.1"
