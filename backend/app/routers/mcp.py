@@ -1,26 +1,28 @@
 """Model Context Protocol (MCP) API endpoints."""
 
 from typing import Annotated, Any
-from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Response
-from fastapi.security import OAuth2PasswordBearer
-from fastapi.responses import RedirectResponse
 import structlog
+from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import RedirectResponse
+from fastapi.security import OAuth2PasswordBearer
 
 from ..config import settings
+from ..dependencies import (
+    get_auth_service,
+    get_rate_limit_service,
+    get_storage,
+)
+from ..models.auth import RateLimitInfo, TokenData
 from ..models.mcp import (
-    MCPTool,
+    HostInfo,
     MCPRequest,
     MCPResponse,
-    ManifestResponse,
+    MCPTool,
     PageResponse,
-    HostInfo,
 )
-from ..models.auth import TokenData, RateLimitInfo
 from ..services.auth import AuthService
 from ..services.rate_limit import RateLimitService
-from ..dependencies import get_redis, get_storage, get_auth_service, get_rate_limit_service
 
 logger = structlog.get_logger()
 
@@ -37,13 +39,13 @@ async def verify_token_and_scope(
     token_data = await auth_service.verify_token(token)
     if not token_data:
         raise HTTPException(status_code=401, detail="Invalid token")
-        
+
     if required_scope not in token_data.scopes:
         raise HTTPException(
             status_code=403,
             detail=f"Missing required scope: {required_scope}"
         )
-        
+
     return token_data
 
 
@@ -59,12 +61,12 @@ async def check_rate_limit(
         settings.rate_limit_per_minute,
         60
     )
-    
+
     # Set rate limit headers
     response.headers["X-RateLimit-Limit"] = str(rate_info.limit)
     response.headers["X-RateLimit-Remaining"] = str(rate_info.remaining)
     response.headers["X-RateLimit-Reset"] = str(int(rate_info.reset.timestamp()))
-    
+
     if not is_allowed:
         response.headers["Retry-After"] = str(rate_info.retry_after)
         raise HTTPException(
@@ -74,7 +76,7 @@ async def check_rate_limit(
                 "Retry-After": str(rate_info.retry_after)
             }
         )
-        
+
     return rate_info
 
 
@@ -164,20 +166,20 @@ async def fetch_manifest(
     # Check if host exists
     hosts = await storage.get_hosts()
     host_exists = any(h['host'] == host for h in hosts)
-    
+
     if not host_exists:
         raise HTTPException(status_code=404, detail=f"Host {host} not found")
-        
+
     # Redirect to CDN URL
     manifest_url = f"{settings.cdn_url}/llm/{host}/llm.txt"
-    
+
     logger.info(
         "Manifest fetch",
         user=token_data.sub,
         host=host,
         url=manifest_url
     )
-    
+
     return RedirectResponse(url=manifest_url, status_code=302)
 
 
@@ -190,25 +192,25 @@ async def fetch_page(
 ) -> PageResponse:
     """Fetch a specific page content."""
     from urllib.parse import urlparse
-    
+
     parsed = urlparse(url)
     host = parsed.netloc
-    
+
     # Get page info from database
     page_info = await storage.get_page_info(url)
-    
+
     if not page_info:
         raise HTTPException(status_code=404, detail="Page not found")
-        
+
     # Build S3 key
     path = parsed.path.lstrip('/')
     if not path:
         path = "index.html"
     elif not path.endswith('.html'):
         path += '/index.html'
-        
+
     content_url = f"{settings.cdn_url}/pages/{host}/{path}"
-    
+
     return PageResponse(
         url=url,
         content_url=content_url,
@@ -227,7 +229,7 @@ async def list_hosts(
 ) -> list[HostInfo]:
     """List all crawled hosts."""
     hosts = await storage.get_hosts()
-    
+
     result = []
     for host_data in hosts:
         # Get manifest info
@@ -237,7 +239,7 @@ async def list_hosts(
             manifest_hash = hashlib.sha256(manifest_content).hexdigest()
         else:
             manifest_hash = ""
-            
+
         result.append(HostInfo(
             host=host_data['host'],
             total_pages=host_data['total_pages'],
@@ -247,7 +249,7 @@ async def list_hosts(
             manifest_hash=manifest_hash[:16],
             change_frequency="daily"  # Placeholder
         ))
-        
+
     return result
 
 

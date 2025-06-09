@@ -1,21 +1,17 @@
 """OAuth 2.1 PKCE authentication endpoints."""
 
-from typing import Annotated
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Form, Response
-from fastapi.responses import RedirectResponse, HTMLResponse
 import structlog
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ..config import settings
+from ..dependencies import get_auth_service
 from ..models.auth import (
-    AuthorizationRequest,
-    TokenRequest,
     Token,
-    User,
 )
 from ..services.auth import AuthService
-from ..dependencies import get_auth_service
 
 logger = structlog.get_logger()
 
@@ -37,11 +33,11 @@ async def authorize(
     # Validate client_id
     if client_id != settings.oauth_client_id:
         raise HTTPException(status_code=400, detail="Invalid client_id")
-        
+
     # Validate redirect_uri
     if redirect_uri not in settings.allowed_redirect_uris:
         raise HTTPException(status_code=400, detail="Invalid redirect_uri")
-        
+
     # In production, would show login form
     # For demo, auto-approve with test user
     login_form = f"""
@@ -120,7 +116,7 @@ async def authorize(
     </body>
     </html>
     """
-    
+
     return HTMLResponse(content=login_form)
 
 
@@ -144,11 +140,11 @@ async def authorize_post(
             "state": state
         })
         return RedirectResponse(url=f"{redirect_uri}?{error_params}")
-        
+
     # Create authorization code
     # In production, would use actual authenticated user ID
     user_id = "demo_user_123"
-    
+
     code = await auth_service.create_authorization_code(
         user_id=user_id,
         client_id=client_id,
@@ -157,13 +153,13 @@ async def authorize_post(
         code_challenge=code_challenge,
         code_challenge_method=code_challenge_method
     )
-    
+
     # Redirect back with code
     success_params = urlencode({
         "code": code,
         "state": state
     })
-    
+
     return RedirectResponse(url=f"{redirect_uri}?{success_params}")
 
 
@@ -182,19 +178,19 @@ async def token(
     # Validate client
     if client_id != settings.oauth_client_id:
         raise HTTPException(status_code=400, detail="Invalid client_id")
-        
+
     # Public clients don't use client_secret
     # If provided, validate it
     if client_secret and client_secret != settings.oauth_client_secret:
         raise HTTPException(status_code=400, detail="Invalid client_secret")
-        
+
     if grant_type == "authorization_code":
         if not all([code, redirect_uri, code_verifier]):
             raise HTTPException(
                 status_code=400,
                 detail="Missing required parameters for authorization_code grant"
             )
-            
+
         # Exchange code for tokens
         token_data = await auth_service.exchange_authorization_code(
             code=code,
@@ -202,30 +198,30 @@ async def token(
             redirect_uri=redirect_uri,
             code_verifier=code_verifier
         )
-        
+
         if not token_data:
             raise HTTPException(status_code=400, detail="Invalid authorization code")
-            
+
         return Token(**token_data)
-        
+
     elif grant_type == "refresh_token":
         if not refresh_token:
             raise HTTPException(
                 status_code=400,
                 detail="Missing refresh_token"
             )
-            
+
         # Refresh access token
         token_data = await auth_service.refresh_access_token(
             refresh_token=refresh_token,
             client_id=client_id
         )
-        
+
         if not token_data:
             raise HTTPException(status_code=400, detail="Invalid refresh token")
-            
+
         return Token(**token_data)
-        
+
     else:
         raise HTTPException(status_code=400, detail="Unsupported grant_type")
 
@@ -241,7 +237,7 @@ async def revoke_token(
     token_data = await auth_service.verify_token(token)
     if token_data and token_data.jti:
         await auth_service.revoke_token(token_data.jti)
-        
+
     # Always return 200 OK per spec
     return Response(status_code=200)
 
@@ -250,7 +246,7 @@ async def revoke_token(
 async def oauth_metadata():
     """OAuth 2.1 server metadata."""
     base_url = "https://api.example.com"  # In production, get from request
-    
+
     return {
         "issuer": base_url,
         "authorization_endpoint": f"{base_url}/auth/authorize",

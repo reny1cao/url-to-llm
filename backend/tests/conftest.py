@@ -4,11 +4,11 @@ import asyncio
 from typing import AsyncGenerator
 
 import pytest
-from httpx import AsyncClient
 from fastapi.testclient import TestClient
+from httpx import AsyncClient
 
+from app.dependencies import close_dependencies, init_dependencies
 from app.main import app
-from app.dependencies import init_dependencies, close_dependencies
 
 
 @pytest.fixture(scope="session")

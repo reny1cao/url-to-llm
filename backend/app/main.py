@@ -2,14 +2,14 @@
 
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import structlog
 from prometheus_client import make_asgi_app
 
 from .config import settings
-from .dependencies import init_dependencies, close_dependencies
+from .dependencies import close_dependencies, init_dependencies
 from .routers import auth, mcp
 
 # Configure structured logging
@@ -38,9 +38,9 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting application")
     await init_dependencies()
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down application")
     await close_dependencies()
@@ -113,7 +113,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         method=request.method,
         exc_info=exc
     )
-    
+
     return JSONResponse(
         status_code=500,
         content={

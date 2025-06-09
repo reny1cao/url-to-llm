@@ -1,12 +1,12 @@
 """Development endpoints (disabled in production)."""
 
 from typing import List
-from fastapi import APIRouter, HTTPException
+
 import structlog
+from fastapi import APIRouter, HTTPException
 
 from ..config import settings
-from ..models.mcp import HostInfo, ManifestResponse, PageResponse
-from ..dependencies import get_storage
+from ..models.mcp import HostInfo, ManifestResponse
 
 logger = structlog.get_logger()
 
@@ -18,10 +18,10 @@ async def list_hosts_dev(storage=None):
     """List all hosts (dev mode - no auth)."""
     if settings.environment != "development":
         raise HTTPException(status_code=404, detail="Not found")
-    
+
     # Mock data for now
     from datetime import datetime
-    
+
     return [
         HostInfo(
             host="example.com",
@@ -37,7 +37,7 @@ async def list_hosts_dev(storage=None):
             total_pages=50,
             accessible_pages=48,
             blocked_pages=2,
-            last_crawled=datetime.fromisoformat("2024-01-02T00:00:00"), 
+            last_crawled=datetime.fromisoformat("2024-01-02T00:00:00"),
             manifest_hash="789xyz012",
             change_frequency="weekly"
         )
@@ -49,7 +49,7 @@ async def get_manifest_dev(host: str):
     """Get llm.txt manifest for a host (dev mode - no auth)."""
     if settings.environment != "development":
         raise HTTPException(status_code=404, detail="Not found")
-    
+
     # Mock manifest - return raw manifest content as text
     manifest_content = f"""# {host} llm.txt
 
@@ -70,9 +70,9 @@ This site contains example content for testing.
 ## License
 Content is provided for testing purposes only.
 """
-    
+
     from datetime import datetime
-    
+
     return ManifestResponse(
         host=host,
         manifest_url=f"{settings.cdn_url}/{host}/llm.txt",

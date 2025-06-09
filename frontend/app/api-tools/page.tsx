@@ -154,7 +154,7 @@ manifest = response.json()`,
             MCP Configuration
           </h2>
           <p className="text-sm text-gray-600 mb-4">
-            Add this to your AI agent's MCP configuration:
+            Add this to your AI agent&apos;s MCP configuration:
           </p>
           <div className="relative">
             <pre className="bg-gray-50 p-3 rounded-lg text-sm overflow-x-auto">

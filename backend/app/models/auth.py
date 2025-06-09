@@ -1,20 +1,21 @@
 """Authentication models."""
 
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, Field, EmailStr
+from typing import List, Optional
+
+from pydantic import BaseModel, EmailStr, Field
 
 
 class TokenScope(BaseModel):
     """OAuth2 scope definition."""
-    
+
     name: str
     description: str
 
 
 class Token(BaseModel):
     """OAuth2 token response."""
-    
+
     access_token: str
     token_type: str = "bearer"
     expires_in: int
@@ -24,7 +25,7 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     """Decoded token data."""
-    
+
     sub: str  # Subject (user ID)
     scopes: List[str] = []
     exp: datetime
@@ -34,7 +35,7 @@ class TokenData(BaseModel):
 
 class User(BaseModel):
     """User model."""
-    
+
     id: str
     email: EmailStr
     is_active: bool = True
@@ -45,20 +46,20 @@ class User(BaseModel):
 
 class UserInDB(User):
     """User in database with hashed password."""
-    
+
     hashed_password: str
 
 
 class PKCEChallenge(BaseModel):
     """PKCE challenge for OAuth2.1."""
-    
+
     code_challenge: str = Field(..., min_length=43, max_length=128)
     code_challenge_method: str = Field(default="S256", pattern="^(plain|S256)$")
 
 
 class AuthorizationRequest(BaseModel):
     """OAuth2.1 authorization request."""
-    
+
     response_type: str = Field(default="code", pattern="^code$")
     client_id: str
     redirect_uri: str
@@ -70,18 +71,18 @@ class AuthorizationRequest(BaseModel):
 
 class TokenRequest(BaseModel):
     """OAuth2.1 token request."""
-    
+
     grant_type: str = Field(..., pattern="^(authorization_code|refresh_token)$")
     code: Optional[str] = None
     redirect_uri: Optional[str] = None
     code_verifier: Optional[str] = Field(None, min_length=43, max_length=128)
     refresh_token: Optional[str] = None
     client_id: str
-    
-    
+
+
 class RateLimitInfo(BaseModel):
     """Rate limit information."""
-    
+
     limit: int
     remaining: int
     reset: datetime

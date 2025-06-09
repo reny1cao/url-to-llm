@@ -51,9 +51,11 @@ line-length = 88
 target-version = ['py312']
 
 [tool.ruff]
-line-length = 88
-select = ["E", "F", "I", "N", "W"]
 target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]  # Ignore line too long
 
 [tool.mypy]
 python_version = "3.12"

@@ -1,10 +1,10 @@
 """Dependency injection for FastAPI."""
 
-from typing import AsyncGenerator, Any, Optional
+from typing import Any, AsyncGenerator, Optional
 
-import redis.asyncio as redis
-import asyncpg
 import aioboto3
+import asyncpg
+import redis.asyncio as redis
 import structlog
 from fastapi import Depends
 
@@ -23,40 +23,40 @@ _s3_session: Optional[aioboto3.Session] = None
 async def init_dependencies():
     """Initialize global dependencies."""
     global _redis_pool, _pg_pool, _s3_session
-    
+
     # Redis connection pool
     _redis_pool = redis.ConnectionPool.from_url(
         settings.redis_url,
         max_connections=50,
         decode_responses=True
     )
-    
+
     # PostgreSQL connection pool
     _pg_pool = await asyncpg.create_pool(
         settings.database_url,
         min_size=10,
         max_size=20
     )
-    
+
     # S3 session
     _s3_session = aioboto3.Session(
         aws_access_key_id=settings.s3_access_key,
         aws_secret_access_key=settings.s3_secret_key,
     )
-    
+
     logger.info("Dependencies initialized")
 
 
 async def close_dependencies():
     """Close all dependencies."""
     global _redis_pool, _pg_pool
-    
+
     if _redis_pool:
         await _redis_pool.disconnect()
-        
+
     if _pg_pool:
         await _pg_pool.close()
-        
+
     logger.info("Dependencies closed")
 
 
@@ -86,7 +86,7 @@ async def get_storage() -> AsyncGenerator[Any, None]:
     """Get storage adapter instance."""
     # Import here to avoid circular imports
     from crawler.src.storage import StorageAdapter
-    
+
     storage = StorageAdapter(
         db_url=settings.database_url,
         s3_endpoint=settings.s3_endpoint,
@@ -97,7 +97,7 @@ async def get_storage() -> AsyncGenerator[Any, None]:
     # Use existing pool
     storage._pool = _pg_pool
     storage._s3_session = _s3_session
-    
+
     yield storage
 
 
