@@ -1,0 +1,32 @@
+# This is a CODEOWNERS file
+# Each line is a file pattern followed by one or more owners.
+
+# Global owners
+* @engineering-team
+
+# Backend
+/backend/ @backend-team @engineering-lead
+/backend/app/routers/mcp.py @mcp-team @backend-team
+
+# Crawler
+/crawler/ @crawler-team @engineering-lead
+/crawler/src/crawler.py @crawler-team @performance-team
+
+# Frontend
+/frontend/ @frontend-team @engineering-lead
+/frontend/app/ @frontend-team
+/frontend/components/ @frontend-team @ui-team
+
+# Infrastructure
+/docker-compose.yml @devops-team
+/Dockerfile @devops-team
+/.github/workflows/ @devops-team @engineering-lead
+/terraform/ @devops-team @security-team
+
+# Documentation
+*.md @documentation-team
+/docs/ @documentation-team @engineering-team
+
+# Security
+/backend/app/routers/auth.py @security-team @backend-team
+/backend/app/services/auth.py @security-team @backend-team

@@ -1,0 +1,147 @@
+name: Security
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * 1'  # Weekly on Monday
+
+jobs:
+  # Scan for secrets
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: TruffleHog OSS
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --debug --only-verified
+
+  # Security scanning for Python dependencies
+  python-security:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [backend, crawler]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.7.1
+      
+      - name: Export requirements
+        working-directory: ./${{ matrix.component }}
+        run: |
+          poetry export -f requirements.txt --without-hashes > requirements.txt
+      
+      - name: Run Bandit
+        working-directory: ./${{ matrix.component }}
+        run: |
+          pip install bandit[toml]
+          bandit -r . -f json -o bandit-report.json || true
+      
+      - name: Run Safety check
+        working-directory: ./${{ matrix.component }}
+        run: |
+          pip install safety
+          safety check -r requirements.txt --json > safety-report.json || true
+      
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: python-security-${{ matrix.component }}
+          path: |
+            ${{ matrix.component }}/bandit-report.json
+            ${{ matrix.component }}/safety-report.json
+
+  # Security scanning for Node.js dependencies
+  nodejs-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Run npm audit
+        working-directory: ./frontend
+        run: |
+          npm audit --json > npm-audit.json || true
+      
+      - name: Upload security report
+        uses: actions/upload-artifact@v3
+        with:
+          name: nodejs-security
+          path: frontend/npm-audit.json
+
+  # Container scanning
+  container-scan:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    strategy:
+      matrix:
+        component: [backend, crawler, frontend]
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Build image
+        run: |
+          docker build -t ${{ matrix.component }}:scanning ./${{ matrix.component }}
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ matrix.component }}:scanning
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+      
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # SAST with CodeQL
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      matrix:
+        language: [ 'javascript', 'python' ]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: ${{ matrix.language }}
+      
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v2
+      
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2

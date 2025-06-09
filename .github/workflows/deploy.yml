@@ -1,0 +1,163 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  AWS_REGION: us-east-1
+
+jobs:
+  # Deploy to staging
+  deploy-staging:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: staging
+      url: https://staging.url-to-llm.example.com
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Update ECS task definitions
+        run: |
+          # Update backend task definition
+          aws ecs describe-task-definition \
+            --task-definition url-to-llm-backend-staging \
+            --query 'taskDefinition' > backend-task-def.json
+          
+          # Update image in task definition
+          jq '.containerDefinitions[0].image = "'${{ env.REGISTRY }}'/'${{ env.IMAGE_NAME }}'-backend:main"' \
+            backend-task-def.json > backend-task-def-updated.json
+          
+          # Register new task definition
+          aws ecs register-task-definition --cli-input-json file://backend-task-def-updated.json
+          
+          # Update service
+          aws ecs update-service \
+            --cluster url-to-llm-staging \
+            --service backend \
+            --task-definition url-to-llm-backend-staging
+      
+      - name: Deploy frontend to S3/CloudFront
+        run: |
+          # Pull and extract frontend
+          docker create --name frontend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:main
+          docker cp frontend:/app/.next/static ./static
+          docker cp frontend:/app/public ./public
+          docker rm frontend
+          
+          # Sync to S3
+          aws s3 sync ./static s3://${{ secrets.FRONTEND_BUCKET }}/staging/_next/static \
+            --cache-control "public, max-age=31536000, immutable"
+          aws s3 sync ./public s3://${{ secrets.FRONTEND_BUCKET }}/staging \
+            --cache-control "public, max-age=3600"
+          
+          # Invalidate CloudFront
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/staging/*"
+      
+      - name: Run smoke tests
+        run: |
+          sleep 60  # Wait for deployment
+          curl -f https://staging.url-to-llm.example.com/health || exit 1
+
+  # Deploy to production
+  deploy-production:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [deploy-staging]
+    environment:
+      name: production
+      url: https://url-to-llm.example.com
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PROD }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Get release version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Update ECS task definitions
+        run: |
+          # Similar to staging but for production cluster
+          # Update backend, crawler services
+          for service in backend crawler; do
+            aws ecs describe-task-definition \
+              --task-definition url-to-llm-${service}-prod \
+              --query 'taskDefinition' > ${service}-task-def.json
+            
+            jq '.containerDefinitions[0].image = "'${{ env.REGISTRY }}'/'${{ env.IMAGE_NAME }}'-'${service}':'${{ steps.version.outputs.VERSION }}'"' \
+              ${service}-task-def.json > ${service}-task-def-updated.json
+            
+            aws ecs register-task-definition --cli-input-json file://${service}-task-def-updated.json
+            
+            aws ecs update-service \
+              --cluster url-to-llm-prod \
+              --service ${service} \
+              --task-definition url-to-llm-${service}-prod
+          done
+      
+      - name: Deploy frontend to production
+        run: |
+          # Pull and extract frontend
+          docker create --name frontend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ steps.version.outputs.VERSION }}
+          docker cp frontend:/app/.next/static ./static
+          docker cp frontend:/app/public ./public
+          docker rm frontend
+          
+          # Sync to S3
+          aws s3 sync ./static s3://${{ secrets.FRONTEND_BUCKET_PROD }}/_next/static \
+            --cache-control "public, max-age=31536000, immutable"
+          aws s3 sync ./public s3://${{ secrets.FRONTEND_BUCKET_PROD }} \
+            --cache-control "public, max-age=3600"
+          
+          # Invalidate CloudFront
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID_PROD }} \
+            --paths "/*"
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true
+          files: |
+            docker-compose.yml
+            README.md

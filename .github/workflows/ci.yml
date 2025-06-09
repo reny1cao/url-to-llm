@@ -1,0 +1,256 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Lint and type check Python code
+  lint-python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [backend, crawler]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.7.1
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: ./${{ matrix.component }}/.venv
+          key: venv-${{ runner.os }}-${{ matrix.component }}-${{ hashFiles(format('./{0}/poetry.lock', matrix.component)) }}
+      
+      - name: Install dependencies
+        working-directory: ./${{ matrix.component }}
+        run: poetry install --no-interaction --no-root
+      
+      - name: Run ruff
+        working-directory: ./${{ matrix.component }}
+        run: poetry run ruff check .
+      
+      - name: Run mypy
+        working-directory: ./${{ matrix.component }}
+        run: poetry run mypy .
+
+  # Lint and type check TypeScript code
+  lint-typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+      
+      - name: Run ESLint
+        working-directory: ./frontend
+        run: npm run lint
+      
+      - name: Run TypeScript check
+        working-directory: ./frontend
+        run: npm run type-check
+
+  # Run Python tests
+  test-python:
+    runs-on: ubuntu-latest
+    needs: lint-python
+    strategy:
+      matrix:
+        component: [backend, crawler]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.7.1
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: ./${{ matrix.component }}/.venv
+          key: venv-${{ runner.os }}-${{ matrix.component }}-${{ hashFiles(format('./{0}/poetry.lock', matrix.component)) }}
+      
+      - name: Install dependencies
+        working-directory: ./${{ matrix.component }}
+        run: poetry install --no-interaction
+      
+      - name: Run tests
+        working-directory: ./${{ matrix.component }}
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
+          S3_BUCKET: test-bucket
+          CDN_URL: http://localhost:9000/test-bucket
+          SECRET_KEY: test-secret-key
+          OAUTH_CLIENT_ID: test-client
+          OAUTH_CLIENT_SECRET: test-secret
+        run: |
+          poetry run pytest -v --cov=. --cov-report=xml --cov-report=term
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./${{ matrix.component }}/coverage.xml
+          flags: ${{ matrix.component }}
+
+  # Run frontend tests
+  test-frontend:
+    runs-on: ubuntu-latest
+    needs: lint-typescript
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+      
+      - name: Run tests
+        working-directory: ./frontend
+        run: npm test -- --coverage
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./frontend/coverage/lcov.info
+          flags: frontend
+
+  # Build Docker images
+  build-images:
+    runs-on: ubuntu-latest
+    needs: [test-python, test-frontend]
+    strategy:
+      matrix:
+        component: [backend, crawler, frontend]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.component }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.component }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Integration tests
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: build-images
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Start services
+        run: |
+          docker-compose up -d
+          sleep 30  # Wait for services to be ready
+      
+      - name: Run integration tests
+        run: |
+          # Check backend health
+          curl -f http://localhost:8000/health || exit 1
+          
+          # Check frontend is serving
+          curl -f http://localhost:3000 || exit 1
+          
+          # Test dev API endpoint
+          curl -f http://localhost:8000/dev/hosts || exit 1
+      
+      - name: Logs on failure
+        if: failure()
+        run: docker-compose logs
