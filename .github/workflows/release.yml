@@ -63,7 +63,7 @@ jobs:
       
       - name: Trigger deployment workflow
         if: ${{ !inputs.prerelease }}
-        uses: peter-evans/repository-dispatch@v2
+        uses: peter-evans/repository-dispatch@v3
         with:
           event-type: release-created
           client-payload: '{"version": "${{ inputs.version }}"}'
