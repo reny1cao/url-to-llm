@@ -3,7 +3,8 @@ name = "url-to-llm-crawler"
 version = "0.1.0"
 description = "Playwright-powered incremental web crawler"
 authors = ["URL to LLM Team"]
-package-mode = false
+readme = "README.md"
+packages = [{include = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"

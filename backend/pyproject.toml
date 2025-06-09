@@ -3,7 +3,8 @@ name = "url-to-llm-backend"
 version = "0.1.0"
 description = "FastAPI backend with MCP server for URL to LLM"
 authors = ["URL to LLM Team"]
-package-mode = false
+readme = "README.md"
+packages = [{include = "app"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"
