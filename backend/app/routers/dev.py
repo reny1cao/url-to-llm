@@ -51,25 +51,7 @@ async def get_manifest_dev(host: str):
         raise HTTPException(status_code=404, detail="Not found")
 
     # Mock manifest - return raw manifest content as text
-    manifest_content = f"""# {host} llm.txt
-
-This is a development manifest for {host}.
-
-## Overview
-This site contains example content for testing.
-
-## Access
-- Rate limit: 60 requests per minute
-- Authentication: None required
-
-## Content
-- Total pages: 100
-- Accessible pages: 85
-- Last crawled: 2024-01-01
-
-## License
-Content is provided for testing purposes only.
-"""
+    # Note: manifest_content variable removed as it was unused
 
     from datetime import datetime
 

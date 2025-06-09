@@ -25,7 +25,7 @@ class RateLimitService:
     ) -> Tuple[bool, RateLimitInfo]:
         """
         Check if request is within rate limit.
-        
+
         Returns:
             Tuple of (is_allowed, rate_limit_info)
         """
