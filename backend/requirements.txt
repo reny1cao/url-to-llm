@@ -31,6 +31,8 @@ opentelemetry-instrumentation-fastapi==0.43b0
 structlog==24.1.0
 python-dotenv==1.0.0
 slowapi==0.1.9
+beautifulsoup4==4.12.2
+lxml==4.9.3
 
 # Dev
 pytest==7.4.4

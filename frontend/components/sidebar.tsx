@@ -8,7 +8,8 @@ import {
   FileText, 
   Settings, 
   BarChart3,
-  Zap
+  Zap,
+  TestTube
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -18,6 +19,7 @@ const navigation = [
   { name: 'Manifests', href: '/manifests', icon: FileText },
   { name: 'Analytics', href: '/analytics', icon: BarChart3 },
   { name: 'API Tools', href: '/api-tools', icon: Zap },
+  { name: 'Test Crawler', href: '/test-crawler', icon: TestTube },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
 

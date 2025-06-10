@@ -8,11 +8,13 @@ from typing import Any, Dict, List, Optional
 
 import redis.asyncio as redis
 import structlog
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from ..config import settings
-from ..models.auth import TokenData
+from ..models.auth import TokenData, User
 
 logger = structlog.get_logger()
 
@@ -231,3 +233,53 @@ class AuthService:
             "expires_in": settings.access_token_expire_minutes * 60,
             "scope": "read:llm read:html"
         }
+
+
+# FastAPI Dependencies
+
+security = HTTPBearer()
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+) -> User:
+    """Get current user from JWT token."""
+    from ..core.redis import get_redis
+    
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    try:
+        # Get auth service
+        redis_client = await get_redis()
+        auth_service = AuthService(redis_client)
+        
+        # Verify token
+        token_data = await auth_service.verify_token(credentials.credentials)
+        if token_data is None:
+            raise credentials_exception
+            
+        # For now, return a mock user based on token subject
+        # In production, you would query the database
+        user = User(
+            id=token_data.sub,
+            email=f"{token_data.sub}@example.com",
+            is_active=True,
+            scopes=token_data.scopes
+        )
+        
+        return user
+        
+    except JWTError:
+        raise credentials_exception
+
+
+async def get_current_active_user(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    """Get current active user."""
+    if not current_user.is_active:
+        raise HTTPException(status_code=400, detail="Inactive user")
+    return current_user

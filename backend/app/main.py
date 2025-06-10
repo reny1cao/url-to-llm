@@ -11,6 +11,7 @@ from prometheus_client import make_asgi_app
 from .config import settings
 from .dependencies import close_dependencies, init_dependencies
 from .routers import auth, mcp
+from .api import crawl
 
 # Configure structured logging
 structlog.configure(
@@ -67,6 +68,7 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router)
 app.include_router(mcp.router)
+app.include_router(crawl.router)
 
 # Development endpoints
 if settings.environment == "development":
