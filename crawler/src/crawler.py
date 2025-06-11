@@ -10,7 +10,7 @@ from urllib.robotparser import RobotFileParser
 
 from bs4 import BeautifulSoup
 import structlog
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 
 from .detector import ChangeDetector
 from .fetcher import PageFetcher
@@ -116,6 +116,7 @@ class Crawler:
         )
         self.robot_parsers: Dict[str, RobotFileParser] = {}
         self.manifest_generator = LLMManifest(self.storage)
+        self.progress_callback: Optional[Callable] = None
         
     async def initialize(self):
         """Initialize crawler components."""
@@ -126,6 +127,10 @@ class Crawler:
         """Clean up resources."""
         await self.storage.close()
         await self.fetcher.close()
+        
+    def set_progress_callback(self, callback: Callable):
+        """Set callback for progress updates."""
+        self.progress_callback = callback
         
     async def crawl_host(self, host: str) -> Dict[str, any]:
         """Crawl a single host."""
@@ -150,6 +155,8 @@ class Crawler:
         # Crawl statistics
         pages_crawled = 0
         pages_changed = 0
+        pages_failed = 0
+        bytes_downloaded = 0
         
         try:
             while frontier.size() > 0 and pages_crawled < self.settings.max_pages_per_host:
@@ -220,6 +227,18 @@ class Crawler:
                                 frontier.add(link, depth + 1)
                                 
                     pages_crawled += 1
+                    if content:
+                        bytes_downloaded += len(content.encode('utf-8'))
+                    
+                    # Report progress
+                    if self.progress_callback and pages_crawled % 10 == 0:
+                        await self.progress_callback(
+                            pages_crawled=pages_crawled,
+                            pages_discovered=frontier.size() + pages_crawled,
+                            pages_failed=pages_failed,
+                            bytes_downloaded=bytes_downloaded,
+                            current_url=url
+                        )
                     
                     if pages_crawled % 100 == 0:
                         logger.info(
@@ -232,6 +251,7 @@ class Crawler:
                         
                 except Exception as e:
                     logger.error("Failed to crawl page", url=url, error=str(e))
+                    pages_failed += 1
                     
             # Complete session
             await self.storage.complete_crawl_session(

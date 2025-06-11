@@ -6,7 +6,7 @@ pydantic-settings==2.1.0
 
 # Database
 asyncpg==0.29.0
-redis==5.0.1
+redis==4.5.4
 
 # Storage
 aioboto3==12.1.0
@@ -33,6 +33,11 @@ python-dotenv==1.0.0
 slowapi==0.1.9
 beautifulsoup4==4.12.2
 lxml==4.9.3
+
+# Task Queue
+celery[redis]==5.3.4
+flower==2.0.1
+kombu==5.3.4
 
 # Dev
 pytest==7.4.4

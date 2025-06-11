@@ -72,3 +72,48 @@ init:
 	cp .env.example .env
 	@echo "Environment file created. Please edit .env with your settings."
 	@echo "Run 'make build' to build images, then 'make up' to start services."
+
+# Worker management
+worker:
+	docker-compose up -d celery-worker
+
+worker-logs:
+	docker-compose logs -f celery-worker
+
+worker-restart:
+	docker-compose restart celery-worker
+
+worker-scale:
+	@if [ -z "$(N)" ]; then \
+		echo "Usage: N=4 make worker-scale"; \
+		exit 1; \
+	fi
+	docker-compose up -d --scale celery-worker=$(N) celery-worker
+	@echo "Scaled to $(N) workers"
+
+# Monitoring
+flower:
+	docker-compose up -d flower
+	@echo "Flower UI available at http://localhost:5555 (admin:admin)"
+
+# Database
+migrate:
+	docker-compose exec backend python run_migrations.py
+
+# Production
+prod-build:
+	docker-compose -f docker-compose.yml -f docker-compose.prod.yml build
+
+prod-up:
+	docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+# Full stack management
+stack-up: up worker flower migrate
+	@echo "Full stack started!"
+	@echo "  - Backend API: http://localhost:8000"
+	@echo "  - Frontend: http://localhost:3000"
+	@echo "  - MinIO: http://localhost:9001"
+	@echo "  - Flower: http://localhost:5555"
+
+stack-down:
+	docker-compose down

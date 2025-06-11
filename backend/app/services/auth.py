@@ -13,7 +13,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-from ..config import settings
+from ..core.config import settings
 from ..models.auth import TokenData, User
 
 logger = structlog.get_logger()
@@ -283,3 +283,29 @@ async def get_current_active_user(
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
+
+
+async def verify_websocket_token(token: str) -> Optional[User]:
+    """Verify WebSocket token and return user."""
+    try:
+        # Get auth service
+        redis_client = await get_redis()
+        auth_service = AuthService(redis_client)
+        
+        # Verify token
+        token_data = await auth_service.verify_token(token)
+        if token_data is None:
+            return None
+            
+        # Return user
+        user = User(
+            id=token_data.sub,
+            email=f"{token_data.sub}@example.com",
+            is_active=True,
+            scopes=token_data.scopes
+        )
+        
+        return user
+        
+    except Exception:
+        return None

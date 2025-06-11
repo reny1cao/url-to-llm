@@ -1,30 +1,32 @@
 """Crawl management endpoints."""
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 from datetime import datetime
+from uuid import UUID
 import os
 import sys
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel, HttpUrl
 import structlog
+import asyncpg
 
 from ..models.auth import User
+from ..models.jobs import (
+    JobCreateRequest, JobResponse, CrawlJob, JobFilter,
+    JobStatus, JobProgress
+)
 from ..services.auth import get_current_user
 from ..services.rate_limit import RateLimitService
+from ..repositories.jobs import JobRepository
+from ..dependencies import get_job_repository, get_rate_limit_service
+from ..tasks.crawler_tasks import run_crawl_task
 
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/crawl", tags=["crawl"])
 
 
-async def get_rate_limit_service():
-    """Get rate limit service."""
-    # For now, create a mock rate limit service
-    # In production, you would get the actual Redis client
-    import redis.asyncio as redis
-    redis_client = redis.Redis(host="redis", port=6379, decode_responses=True)
-    return RateLimitService(redis_client)
 
 
 class CrawlRequest(BaseModel):
@@ -58,12 +60,12 @@ class TestCrawlResponse(BaseModel):
     pages_changed: int
 
 
-@router.post("/start", response_model=Dict[str, str])
+@router.post("/start", response_model=JobResponse)
 async def start_crawl(
-    request: CrawlRequest,
-    background_tasks: BackgroundTasks,
+    request: JobCreateRequest,
     current_user: User = Depends(get_current_user),
     rate_limit: RateLimitService = Depends(get_rate_limit_service),
+    job_repo: JobRepository = Depends(get_job_repository),
 ):
     """Start a crawl job for a host."""
     # Check rate limit
@@ -85,19 +87,52 @@ async def start_crawl(
             }
         )
     
-    # Extract host from URL
-    host = request.url.host
+    # Create crawl job
+    job = CrawlJob(
+        host=request.host,
+        max_pages=request.max_pages,
+        follow_links=request.follow_links,
+        respect_robots_txt=request.respect_robots_txt,
+        priority=request.priority,
+        created_by=current_user.id
+    )
     
-    # Create job ID
-    job_id = f"crawl_{host}_{datetime.utcnow().timestamp()}"
+    # Save job to database
+    job = await job_repo.create_job(job)
     
-    # Queue crawl job
-    # In production, this would use a proper task queue like Celery
-    background_tasks.add_task(run_crawl, job_id, host, request.max_pages)
+    # Queue the task with Celery
+    celery_task = run_crawl_task.apply_async(
+        args=[
+            str(job.id),
+            job.host,
+            job.max_pages,
+            job.follow_links,
+            job.respect_robots_txt
+        ],
+        queue="crawler",
+        priority=job.priority
+    )
     
-    logger.info("Crawl job queued", job_id=job_id, host=host, user_id=current_user.id)
+    # Update job with Celery task ID
+    job.celery_task_id = celery_task.id
+    job = await job_repo.update_job_status(
+        job.id, 
+        JobStatus.PENDING,
+        celery_task_id=celery_task.id
+    )
     
-    return {"job_id": job_id, "status": "queued"}
+    # Get queue position
+    position = await job_repo.get_queue_position(job.id)
+    
+    logger.info("Crawl job created", 
+                job_id=str(job.id), 
+                host=job.host, 
+                user_id=current_user.id)
+    
+    return JobResponse(
+        job=job,
+        position_in_queue=position
+    )
 
 
 @router.post("/test", response_model=TestCrawlResponse)
@@ -141,33 +176,104 @@ async def test_crawl(request: TestCrawlRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/status/{job_id}", response_model=CrawlStatus)
+@router.get("/status/{job_id}", response_model=JobResponse)
 async def get_crawl_status(
-    job_id: str,
+    job_id: UUID,
     current_user: User = Depends(get_current_user),
+    job_repo: JobRepository = Depends(get_job_repository),
 ):
     """Get status of a crawl job."""
-    # In production, this would fetch from a job queue/database
-    # For now, return mock data
-    return CrawlStatus(
-        job_id=job_id,
-        host="example.com",
-        status="completed",
-        pages_crawled=50,
-        pages_changed=5,
-        started_at=datetime.utcnow(),
-        completed_at=datetime.utcnow(),
+    job = await job_repo.get_job(job_id)
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Check if user owns this job
+    if job.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Get queue position if pending
+    position = None
+    if job.status == JobStatus.PENDING:
+        position = await job_repo.get_queue_position(job_id)
+    
+    return JobResponse(
+        job=job,
+        position_in_queue=position
     )
 
 
-@router.get("/history", response_model=List[CrawlStatus])
+@router.get("/history", response_model=List[CrawlJob])
 async def get_crawl_history(
     limit: int = 10,
+    offset: int = 0,
+    status: Optional[JobStatus] = None,
     current_user: User = Depends(get_current_user),
+    job_repo: JobRepository = Depends(get_job_repository),
 ):
     """Get user's crawl history."""
-    # In production, this would query from database
-    return []
+    filter = JobFilter(
+        created_by=current_user.id,
+        status=status
+    )
+    
+    jobs = await job_repo.list_jobs(filter, limit=limit, offset=offset)
+    return jobs
+
+
+@router.get("/jobs/{job_id}/progress", response_model=List[JobProgress])
+async def get_job_progress(
+    job_id: UUID,
+    limit: int = 100,
+    current_user: User = Depends(get_current_user),
+    job_repo: JobRepository = Depends(get_job_repository),
+):
+    """Get progress history for a job."""
+    job = await job_repo.get_job(job_id)
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Check if user owns this job
+    if job.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    progress = await job_repo.get_job_progress_history(job_id, limit=limit)
+    return progress
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=CrawlJob)
+async def cancel_job(
+    job_id: UUID,
+    current_user: User = Depends(get_current_user),
+    job_repo: JobRepository = Depends(get_job_repository),
+):
+    """Cancel a crawl job."""
+    job = await job_repo.get_job(job_id)
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Check if user owns this job
+    if job.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Check if job can be cancelled
+    if job.status not in [JobStatus.PENDING, JobStatus.RUNNING]:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot cancel job in {job.status} state"
+        )
+    
+    # Cancel the Celery task if it exists
+    if job.celery_task_id:
+        from celery.result import AsyncResult
+        task = AsyncResult(job.celery_task_id)
+        task.revoke(terminate=True)
+    
+    # Update job status
+    job = await job_repo.cancel_job(job_id)
+    return job
 
 
 async def run_crawl(job_id: str, host: str, max_pages: int):

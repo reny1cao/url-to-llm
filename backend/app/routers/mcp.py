@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordBearer
 
-from ..config import settings
+from ..core.config import settings
 from ..dependencies import (
     get_auth_service,
     get_rate_limit_service,

@@ -8,10 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_client import make_asgi_app
 
-from .config import settings
-from .dependencies import close_dependencies, init_dependencies
+from .core.config import settings
+from .dependencies import cleanup_dependencies, init_dependencies
 from .routers import auth, mcp
-from .api import crawl
+from .api import crawl, websocket
 
 # Configure structured logging
 structlog.configure(
@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down application")
-    await close_dependencies()
+    await cleanup_dependencies()
 
 
 # Create FastAPI app
@@ -69,6 +69,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(mcp.router)
 app.include_router(crawl.router)
+app.include_router(websocket.router)
 
 # Development endpoints
 if settings.environment == "development":

@@ -9,13 +9,15 @@ import {
   Settings, 
   BarChart3,
   Zap,
-  TestTube
+  TestTube,
+  Briefcase
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: Home },
   { name: 'Hosts', href: '/hosts', icon: Globe },
+  { name: 'Jobs', href: '/jobs', icon: Briefcase },
   { name: 'Manifests', href: '/manifests', icon: FileText },
   { name: 'Analytics', href: '/analytics', icon: BarChart3 },
   { name: 'API Tools', href: '/api-tools', icon: Zap },

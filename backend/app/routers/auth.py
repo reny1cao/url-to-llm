@@ -6,7 +6,7 @@ import structlog
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from ..config import settings
+from ..core.config import settings
 from ..dependencies import get_auth_service
 from ..models.auth import (
     Token,

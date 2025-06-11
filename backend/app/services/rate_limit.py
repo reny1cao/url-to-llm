@@ -1,103 +1,109 @@
-"""Rate limiting service using Redis."""
+"""Rate limiting service."""
 
-from datetime import datetime, timedelta, timezone
-from typing import Tuple
+import time
+from typing import Dict, Optional
+from collections import defaultdict
+from datetime import datetime, timedelta
+import asyncio
 
-import redis.asyncio as redis
+from fastapi import HTTPException
 import structlog
-
-from ..models.auth import RateLimitInfo
 
 logger = structlog.get_logger()
 
 
 class RateLimitService:
-    """Handle rate limiting with sliding window algorithm."""
-
-    def __init__(self, redis_client: redis.Redis):
-        self.redis = redis_client
-
+    """Service for managing API rate limits."""
+    
+    def __init__(
+        self,
+        default_limit: int = 60,
+        window_seconds: int = 60,
+        burst_multiplier: float = 1.5
+    ):
+        self.default_limit = default_limit
+        self.window_seconds = window_seconds
+        self.burst_multiplier = burst_multiplier
+        self._requests: Dict[str, list] = defaultdict(list)
+        self._lock = asyncio.Lock()
+    
     async def check_rate_limit(
         self,
-        key: str,
-        limit: int,
-        window_seconds: int = 60
-    ) -> Tuple[bool, RateLimitInfo]:
-        """
-        Check if request is within rate limit.
-
-        Returns:
-            Tuple of (is_allowed, rate_limit_info)
-        """
-        now = datetime.now(timezone.utc)
-        window_start = now - timedelta(seconds=window_seconds)
-
-        # Use Redis sorted set for sliding window
-        pipe = self.redis.pipeline()
-
-        # Remove old entries
-        pipe.zremrangebyscore(
-            f"rate_limit:{key}",
-            "-inf",
-            window_start.timestamp()
-        )
-
-        # Count requests in window
-        pipe.zcard(f"rate_limit:{key}")
-
-        # Execute pipeline
-        results = await pipe.execute()
-        current_count = results[1]
-
-        # Check if under limit
-        if current_count < limit:
-            # Add current request
-            await self.redis.zadd(
-                f"rate_limit:{key}",
-                {str(now.timestamp()): now.timestamp()}
-            )
-
-            # Set expiry
-            await self.redis.expire(f"rate_limit:{key}", window_seconds + 1)
-
-            rate_limit_info = RateLimitInfo(
-                limit=limit,
-                remaining=limit - current_count - 1,
-                reset=now + timedelta(seconds=window_seconds)
-            )
-
-            return True, rate_limit_info
-        else:
-            # Get oldest request time to calculate retry_after
-            oldest_timestamp = await self.redis.zrange(
-                f"rate_limit:{key}",
-                0,
-                0,
-                withscores=True
-            )
-
-            if oldest_timestamp:
-                oldest_time = datetime.fromtimestamp(
-                    oldest_timestamp[0][1],
-                    tz=timezone.utc
+        user_id: str,
+        limit: Optional[int] = None,
+        resource: str = "default"
+    ) -> bool:
+        """Check if user has exceeded rate limit."""
+        
+        limit = limit or self.default_limit
+        burst_limit = int(limit * self.burst_multiplier)
+        key = f"{user_id}:{resource}"
+        
+        async with self._lock:
+            now = time.time()
+            window_start = now - self.window_seconds
+            
+            # Clean old requests
+            self._requests[key] = [
+                req_time for req_time in self._requests[key]
+                if req_time > window_start
+            ]
+            
+            # Check limits
+            request_count = len(self._requests[key])
+            
+            if request_count >= burst_limit:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Rate limit exceeded. Max {limit} requests per {self.window_seconds} seconds."
                 )
-                retry_after = int(
-                    (oldest_time + timedelta(seconds=window_seconds) - now).total_seconds()
+            
+            # Log request
+            self._requests[key].append(now)
+            
+            # Warn if approaching limit
+            if request_count >= limit * 0.8:
+                logger.warning(
+                    "User approaching rate limit",
+                    user_id=user_id,
+                    resource=resource,
+                    requests=request_count,
+                    limit=limit
                 )
-            else:
-                retry_after = window_seconds
-
-            rate_limit_info = RateLimitInfo(
-                limit=limit,
-                remaining=0,
-                reset=now + timedelta(seconds=retry_after),
-                retry_after=retry_after
-            )
-
-            return False, rate_limit_info
-
-    async def get_token_key(self, token: str) -> str:
-        """Get rate limit key for a token."""
-        # In production, would decode token to get user ID
-        # For now, use token prefix
-        return f"token:{token[:16]}"
+            
+            return True
+    
+    async def get_remaining_requests(
+        self,
+        user_id: str,
+        limit: Optional[int] = None,
+        resource: str = "default"
+    ) -> int:
+        """Get remaining requests for user."""
+        
+        limit = limit or self.default_limit
+        key = f"{user_id}:{resource}"
+        
+        async with self._lock:
+            now = time.time()
+            window_start = now - self.window_seconds
+            
+            # Count recent requests
+            self._requests[key] = [
+                req_time for req_time in self._requests[key]
+                if req_time > window_start
+            ]
+            
+            request_count = len(self._requests[key])
+            return max(0, limit - request_count)
+    
+    async def reset_user_limit(self, user_id: str, resource: str = "default"):
+        """Reset rate limit for a specific user."""
+        
+        key = f"{user_id}:{resource}"
+        async with self._lock:
+            self._requests[key] = []
+    
+    def get_reset_time(self) -> datetime:
+        """Get time when rate limits reset."""
+        return datetime.utcnow() + timedelta(seconds=self.window_seconds)

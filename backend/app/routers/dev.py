@@ -5,7 +5,7 @@ from typing import List
 import structlog
 from fastapi import APIRouter, HTTPException
 
-from ..config import settings
+from ..core.config import settings
 from ..models.mcp import HostInfo, ManifestResponse
 
 logger = structlog.get_logger()
