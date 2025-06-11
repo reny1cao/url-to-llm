@@ -10,7 +10,7 @@ from prometheus_client import make_asgi_app
 
 from .core.config import settings
 from .dependencies import cleanup_dependencies, init_dependencies
-from .routers import auth, mcp
+from .routers import auth, mcp, users
 from .api import crawl, websocket
 
 # Configure structured logging
@@ -67,6 +67,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth.router)
+app.include_router(users.router)
 app.include_router(mcp.router)
 app.include_router(crawl.router)
 app.include_router(websocket.router)
@@ -96,15 +97,54 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    # TODO: Add actual health checks (DB, Redis, S3)
-    return {
+    import redis.asyncio as redis
+    from .core.config import settings
+    from .db.session import get_db_pool
+    
+    health_status = {
         "status": "healthy",
-        "checks": {
-            "database": "ok",
-            "redis": "ok",
-            "s3": "ok"
-        }
+        "timestamp": datetime.utcnow().isoformat(),
+        "checks": {}
     }
+    
+    # Check database
+    try:
+        pool = await get_db_pool()
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+        health_status["checks"]["database"] = {"status": "ok", "latency_ms": 0}
+    except Exception as e:
+        health_status["checks"]["database"] = {"status": "error", "error": str(e)}
+        health_status["status"] = "unhealthy"
+    
+    # Check Redis
+    try:
+        redis_client = await redis.from_url(settings.redis_url)
+        await redis_client.ping()
+        await redis_client.close()
+        health_status["checks"]["redis"] = {"status": "ok", "latency_ms": 0}
+    except Exception as e:
+        health_status["checks"]["redis"] = {"status": "error", "error": str(e)}
+        health_status["status"] = "unhealthy"
+    
+    # Check S3/MinIO
+    try:
+        import aioboto3
+        session = aioboto3.Session()
+        async with session.client(
+            's3',
+            endpoint_url=settings.s3_endpoint_url,
+            aws_access_key_id=settings.s3_access_key,
+            aws_secret_access_key=settings.s3_secret_key,
+            region_name=settings.s3_region
+        ) as s3:
+            await s3.head_bucket(Bucket=settings.s3_bucket)
+        health_status["checks"]["s3"] = {"status": "ok", "latency_ms": 0}
+    except Exception as e:
+        health_status["checks"]["s3"] = {"status": "error", "error": str(e)}
+        health_status["status"] = "unhealthy"
+    
+    return health_status
 
 
 @app.exception_handler(Exception)

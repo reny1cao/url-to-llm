@@ -15,7 +15,7 @@ from app.core.config import settings
 from app.db.session import get_db_pool
 from app.repositories.jobs import JobRepository
 from app.models.jobs import JobStatus, CrawlJob, JobProgress
-from app.utils.simple_crawler import SimpleCrawler
+from app.tasks.crawler_integration import run_integrated_crawl
 
 logger = get_task_logger(__name__)
 
@@ -66,53 +66,17 @@ def run_crawl_task(
     asyncio.set_event_loop(loop)
     
     try:
-        # Update job status to running
-        loop.run_until_complete(
-            self.job_repo.update_job_status(job_uuid, JobStatus.RUNNING)
-        )
+        # Use the full crawler integration
+        logger.info(f"Starting integrated crawl for {host}")
         
-        # Use SimpleCrawler for now
-        crawler = SimpleCrawler()
-        
-        # Start crawling
-        logger.info(f"Starting crawl for {host}")
-        start_time = datetime.utcnow()
-        
-        # Crawl the URL
+        # Run the integrated crawl
         result = loop.run_until_complete(
-            crawler.crawl_and_generate_manifest(f"https://{host}")
-        )
-        
-        end_time = datetime.utcnow()
-        duration = (end_time - start_time).total_seconds()
-        
-        # Store manifest
-        from app.services.storage import StorageService
-        storage = StorageService()
-        
-        manifest_url = loop.run_until_complete(
-            storage.put_manifest(host, result['manifest'])
-        )
-        
-        # Prepare result
-        result = {
-            "host": host,
-            "pages_crawled": result.get("pages_crawled", 1),
-            "pages_discovered": result.get("pages_discovered", 1),
-            "pages_failed": 0,
-            "bytes_downloaded": len(result['manifest']),
-            "duration_seconds": duration,
-            "manifest_url": manifest_url,
-            "status": "completed"
-        }
-        
-        # Update job as completed
-        loop.run_until_complete(
-            self.job_repo.update_job_status(
-                job_uuid,
-                JobStatus.COMPLETED,
-                result=result,
-                manifest_url=manifest_url
+            run_integrated_crawl(
+                job_id=job_id,
+                host=host,
+                max_pages=max_pages,
+                follow_links=follow_links,
+                respect_robots_txt=respect_robots_txt
             )
         )
         

@@ -38,10 +38,16 @@ class User(BaseModel):
 
     id: str
     email: EmailStr
+    username: str
     is_active: bool = True
-    is_verified: bool = False
+    is_superuser: bool = False
     created_at: datetime
     updated_at: datetime
+    last_login_at: Optional[datetime] = None
+    hashed_password: str = Field(exclude=True)  # Exclude from API responses
+    
+    class Config:
+        from_attributes = True
 
 
 class UserInDB(User):

@@ -139,7 +139,7 @@ async def start_crawl(
 async def test_crawl(request: TestCrawlRequest):
     """Test endpoint to crawl a URL and get manifest directly."""
     from urllib.parse import urlparse
-    from ..utils.simple_crawler import SimpleCrawler
+    from ..tasks.crawler_integration import CrawlerIntegration
     
     # Parse URL to get host
     parsed = urlparse(request.url)
@@ -148,32 +148,47 @@ async def test_crawl(request: TestCrawlRequest):
     if not host:
         raise HTTPException(status_code=400, detail="Invalid URL")
     
-    # Create simple crawler
-    crawler = SimpleCrawler(max_pages=10)
+    # Use full crawler integration for better results
+    integration = CrawlerIntegration()
     
     try:
-        logger.info("Starting test crawl", url=request.url, host=host)
+        logger.info("Starting test crawl with full crawler", url=request.url, host=host)
+        
+        # Initialize crawler
+        await integration.initialize()
+        
+        # Configure for test crawl (limited pages)
+        integration.crawler.settings.max_pages_per_host = 10
         
         # Run crawl
-        crawl_result = await crawler.crawl_site(request.url)
+        result = await integration.crawler.crawl_host(host)
         
-        # Generate manifest
-        manifest = crawler.generate_manifest(crawl_result)
+        # Get manifest from storage
+        manifest_key = f"manifests/{host}/llm.txt"
+        manifest_content = await integration.crawler.storage.get_from_s3(manifest_key)
+        
+        if isinstance(manifest_content, bytes):
+            manifest_content = manifest_content.decode('utf-8')
         
         logger.info("Test crawl completed", 
                    host=host, 
-                   pages_crawled=crawl_result["pages_crawled"])
+                   pages_crawled=result["pages_crawled"],
+                   pages_changed=result["pages_changed"])
         
         return TestCrawlResponse(
             host=host,
-            manifest=manifest,
-            pages_crawled=crawl_result["pages_crawled"],
-            pages_changed=crawl_result["pages_crawled"]  # All pages are "new" in this simple implementation
+            manifest=manifest_content,
+            pages_crawled=result["pages_crawled"],
+            pages_changed=result["pages_changed"]
         )
         
     except Exception as e:
         logger.error("Test crawl failed", url=request.url, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
+    
+    finally:
+        # Clean up
+        await integration.cleanup()
 
 
 @router.get("/status/{job_id}", response_model=JobResponse)

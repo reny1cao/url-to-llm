@@ -6,6 +6,7 @@ from fastapi import Depends
 
 from .db.session import get_db_pool
 from .repositories.jobs import JobRepository
+from .repositories.users import UserRepository
 from .services.rate_limit import RateLimitService
 from .services.auth import AuthService
 from .services.storage import StorageService
@@ -47,6 +48,13 @@ async def get_job_repository(
 ) -> JobRepository:
     """Get job repository instance."""
     return JobRepository(db_pool)
+
+
+async def get_user_repository(
+    db_pool: asyncpg.Pool = Depends(get_db)
+) -> UserRepository:
+    """Get user repository instance."""
+    return UserRepository(db_pool)
 
 
 async def get_rate_limit_service() -> RateLimitService:
