@@ -15,7 +15,7 @@ export default function ManifestsPage() {
     queryFn: api.listHosts,
   })
 
-  const filteredHosts = hosts?.filter(host =>
+  const filteredHosts = hosts?.filter((host: any) =>
     host.host.toLowerCase().includes(searchTerm.toLowerCase())
   ) || []
 
@@ -87,7 +87,7 @@ Content is provided under the site's terms of service.
                 </div>
               ))
             ) : (
-              filteredHosts.map((host) => (
+              filteredHosts.map((host: any) => (
                 <div
                   key={host.host}
                   className="p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer"

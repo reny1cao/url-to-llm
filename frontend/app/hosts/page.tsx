@@ -14,7 +14,7 @@ export default function HostsPage() {
     queryFn: api.listHosts,
   })
 
-  const filteredHosts = hosts?.filter(host =>
+  const filteredHosts = hosts?.filter((host: any) =>
     host.host.toLowerCase().includes(searchTerm.toLowerCase())
   ) || []
 
@@ -61,7 +61,7 @@ export default function HostsPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredHosts.map((host) => (
+          {filteredHosts.map((host: any) => (
             <div key={host.host} className="card hover:shadow-lg transition-shadow">
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center gap-2">
