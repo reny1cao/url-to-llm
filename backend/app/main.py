@@ -11,7 +11,7 @@ from prometheus_client import make_asgi_app
 from .core.config import settings
 from .dependencies import cleanup_dependencies, init_dependencies
 from .routers import auth, mcp, users
-from .api import crawl, websocket
+from .api import crawl, websocket, documentation, agent, crawl_websocket
 
 # Configure structured logging
 structlog.configure(
@@ -71,6 +71,9 @@ app.include_router(users.router)
 app.include_router(mcp.router)
 app.include_router(crawl.router)
 app.include_router(websocket.router)
+app.include_router(documentation.router)
+app.include_router(agent.router)
+app.include_router(crawl_websocket.router)
 
 # Development endpoints
 if settings.environment == "development":
@@ -98,6 +101,7 @@ async def root():
 async def health_check():
     """Health check endpoint."""
     import redis.asyncio as redis
+    from datetime import datetime
     from .core.config import settings
     from .db.session import get_db_pool
     

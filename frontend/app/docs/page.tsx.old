@@ -1,0 +1,393 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { Search, RefreshCw, Download, AlertCircle, CheckCircle, Clock, Eye, Plus, X } from 'lucide-react'
+import { api } from '@/lib/api'
+import { DocumentationSite, DocumentationStats } from '@/lib/types'
+import { formatDistanceToNow } from 'date-fns'
+import { formatBytes } from '@/lib/utils'
+import { ManifestPreview } from '@/components/manifest-preview'
+import Link from 'next/link'
+
+export default function DocumentationPage() {
+  const [sites, setSites] = useState<DocumentationSite[]>([])
+  const [stats, setStats] = useState<DocumentationStats | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [crawlingHost, setCrawlingHost] = useState<string | null>(null)
+  const [manifestPreview, setManifestPreview] = useState<{ isOpen: boolean, siteHost?: string }>({ isOpen: false })
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [newSiteUrl, setNewSiteUrl] = useState('')
+  const [isAddingSite, setIsAddingSite] = useState(false)
+
+  useEffect(() => {
+    fetchData()
+  }, [])
+
+  async function fetchData() {
+    try {
+      const [sitesData, statsData] = await Promise.all([
+        api.getDocumentationSites(),
+        api.getDocumentationStats()
+      ])
+      setSites(sitesData)
+      setStats(statsData)
+    } catch (error) {
+      console.error('Failed to fetch documentation data:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleRecrawl(host: string, url: string) {
+    setCrawlingHost(host)
+    try {
+      await api.recrawlSite(url)
+      // Refresh data after a delay
+      setTimeout(fetchData, 2000)
+    } catch (error) {
+      console.error('Failed to recrawl site:', error)
+    } finally {
+      setCrawlingHost(null)
+    }
+  }
+
+  async function handleAddSite() {
+    if (!newSiteUrl.trim()) return
+    
+    setIsAddingSite(true)
+    try {
+      const response = await api.recrawlSite(newSiteUrl)
+      setShowAddModal(false)
+      setNewSiteUrl('')
+      
+      // Show success message
+      const successDiv = document.createElement('div')
+      successDiv.className = 'fixed bottom-4 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-in fade-in slide-in-from-bottom-2'
+      successDiv.innerHTML = `
+        <div class="flex items-center gap-3">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+          </svg>
+          <div>
+            <p class="font-medium">Documentation crawl started!</p>
+            <p class="text-sm opacity-90">This may take a few minutes. The site will appear once crawling begins.</p>
+          </div>
+        </div>
+      `
+      document.body.appendChild(successDiv)
+      
+      // Remove after 5 seconds
+      setTimeout(() => {
+        successDiv.classList.add('animate-out', 'fade-out', 'slide-out-to-bottom-2')
+        setTimeout(() => successDiv.remove(), 300)
+      }, 5000)
+      
+      // Start polling for updates
+      let pollCount = 0
+      const pollInterval = setInterval(async () => {
+        await fetchData()
+        pollCount++
+        // Stop polling after 30 seconds
+        if (pollCount > 10) {
+          clearInterval(pollInterval)
+        }
+      }, 3000)
+    } catch (error) {
+      console.error('Failed to add documentation site:', error)
+      
+      // Show error message
+      const errorDiv = document.createElement('div')
+      errorDiv.className = 'fixed bottom-4 right-4 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-in fade-in slide-in-from-bottom-2'
+      errorDiv.innerHTML = `
+        <div class="flex items-center gap-3">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+          <div>
+            <p class="font-medium">Failed to add documentation site</p>
+            <p class="text-sm opacity-90">Please check the URL and try again.</p>
+          </div>
+        </div>
+      `
+      document.body.appendChild(errorDiv)
+      
+      // Remove after 5 seconds
+      setTimeout(() => {
+        errorDiv.classList.add('animate-out', 'fade-out', 'slide-out-to-bottom-2')
+        setTimeout(() => errorDiv.remove(), 300)
+      }, 5000)
+    } finally {
+      setIsAddingSite(false)
+    }
+  }
+
+  const filteredSites = sites.filter(site => 
+    site.host.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="container mx-auto px-4 py-8">
+      {/* Header */}
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold mb-2">Documentation Hub</h1>
+        <p className="text-gray-600">
+          AI agent-optimized documentation hosting for frameworks and libraries
+        </p>
+      </div>
+
+      {/* Stats Bar */}
+      {stats && (
+        <div className="bg-gray-50 rounded-lg p-4 mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-6">
+            <div>
+              <span className="text-2xl font-semibold">{stats.total_sites}</span>
+              <span className="text-gray-600 ml-2">Sites</span>
+            </div>
+            <div className="text-gray-300">|</div>
+            <div>
+              <span className="text-2xl font-semibold">{stats.total_pages.toLocaleString()}</span>
+              <span className="text-gray-600 ml-2">Pages</span>
+            </div>
+            <div className="text-gray-300">|</div>
+            <div>
+              <span className="text-2xl font-semibold">{formatBytes(stats.total_size_bytes)}</span>
+              <span className="text-gray-600 ml-2">Total Size</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-green-600" />
+              <span className="text-sm">{stats.freshness.fresh} Fresh</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-yellow-600" />
+              <span className="text-sm">{stats.freshness.recent} Recent</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-600" />
+              <span className="text-sm">{stats.freshness.stale} Stale</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Actions Bar */}
+      <div className="mb-6 flex items-center justify-between">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+          <input
+            type="text"
+            placeholder="Search documentation sites..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            Add Documentation
+          </button>
+          <button
+            onClick={() => setManifestPreview({ isOpen: true })}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+          >
+            <Eye className="w-4 h-4 inline mr-2" />
+            Preview Manifest
+          </button>
+          <button
+            onClick={() => window.open('/api/agent/manifest', '_blank')}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+          >
+            <Download className="w-4 h-4 inline mr-2" />
+            Download Manifest
+          </button>
+          <button
+            onClick={() => window.location.href = '/docs/api'}
+            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+          >
+            API Documentation
+          </button>
+        </div>
+      </div>
+
+      {/* Sites Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {filteredSites.map((site) => (
+          <SiteCard
+            key={site.host}
+            site={site}
+            onRecrawl={handleRecrawl}
+            isCrawling={crawlingHost === site.host}
+          />
+        ))}
+      </div>
+
+      {filteredSites.length === 0 && (
+        <div className="text-center py-12">
+          <p className="text-gray-500">No documentation sites found</p>
+        </div>
+      )}
+
+      {/* Manifest Preview Modal */}
+      <ManifestPreview
+        isOpen={manifestPreview.isOpen}
+        onClose={() => setManifestPreview({ isOpen: false })}
+        siteHost={manifestPreview.siteHost}
+      />
+
+      {/* Add Site Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div 
+            className="absolute inset-0 bg-black/20 backdrop-blur-sm"
+            onClick={() => setShowAddModal(false)}
+          />
+          
+          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold">Add Documentation Site</h2>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            
+            <p className="text-gray-600 mb-4">
+              Enter the URL of a documentation site to crawl and add to the hub.
+            </p>
+            
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+              <p className="text-sm text-blue-800 font-medium mb-1">Examples:</p>
+              <ul className="text-sm text-blue-700 space-y-1">
+                <li>• https://react.dev</li>
+                <li>• https://nextjs.org/docs</li>
+                <li>• https://tailwindcss.com/docs</li>
+                <li>• https://docs.python.org</li>
+              </ul>
+            </div>
+            
+            <input
+              type="url"
+              placeholder="https://docs.example.com"
+              value={newSiteUrl}
+              onChange={(e) => setNewSiteUrl(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+              onKeyDown={(e) => e.key === 'Enter' && handleAddSite()}
+            />
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddSite}
+                disabled={isAddingSite || !newSiteUrl.trim()}
+                className="flex-1 px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center justify-center gap-2"
+              >
+                {isAddingSite ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Adding...
+                  </>
+                ) : (
+                  'Add Site'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SiteCard({ 
+  site, 
+  onRecrawl, 
+  isCrawling
+}: { 
+  site: DocumentationSite
+  onRecrawl: (host: string, url: string) => void
+  isCrawling: boolean
+}) {
+  const getStatusIcon = () => {
+    if (site.is_fresh) return <CheckCircle className="w-5 h-5 text-green-600" />
+    if (site.is_stale) return <AlertCircle className="w-5 h-5 text-red-600" />
+    return <Clock className="w-5 h-5 text-yellow-600" />
+  }
+
+  const getStatusText = () => {
+    const timeAgo = formatDistanceToNow(new Date(site.last_updated), { addSuffix: true })
+    return timeAgo
+  }
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+      <div className="flex items-start justify-between mb-3">
+        <h3 className="font-medium text-lg">{site.host}</h3>
+        {getStatusIcon()}
+      </div>
+      
+      <div className="text-sm text-gray-600 mb-3">
+        <div>{site.total_pages} pages</div>
+        <div className="flex items-center gap-1">
+          {getStatusText()}
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <Link
+          href={`/docs/${site.host}`}
+          className="flex-1 px-3 py-1.5 text-sm text-center text-blue-600 bg-blue-50 rounded hover:bg-blue-100 transition-colors flex items-center justify-center gap-1"
+        >
+          <Eye className="w-3 h-3" />
+          Browse
+        </Link>
+        <a
+          href={site.manifest_url}
+          download
+          className="flex-1 px-3 py-1.5 text-sm text-center text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+        >
+          Manifest
+        </a>
+        {site.is_stale && (
+          <button
+            onClick={() => onRecrawl(site.host, `https://${site.host}`)}
+            disabled={isCrawling}
+            className="flex-1 px-3 py-1.5 text-sm text-center text-white bg-blue-600 rounded hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center justify-center gap-1"
+          >
+            {isCrawling ? (
+              <>
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                Crawling
+              </>
+            ) : (
+              <>
+                <RefreshCw className="w-3 h-3" />
+                Re-crawl
+              </>
+            )}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
