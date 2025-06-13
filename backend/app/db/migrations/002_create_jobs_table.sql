@@ -36,13 +36,15 @@ CREATE TABLE IF NOT EXISTS jobs (
     manifest_url TEXT,
     
     -- User tracking
-    created_by VARCHAR(255),
-    
-    -- Indexes
-    CONSTRAINT jobs_host_idx_idx INDEX (host),
-    CONSTRAINT jobs_status_idx INDEX (status),
-    CONSTRAINT jobs_created_at_idx INDEX (created_at DESC)
+    created_by VARCHAR(255)
 );
+
+-- Create indexes for jobs table
+CREATE INDEX IF NOT EXISTS jobs_host_idx ON jobs (host);
+CREATE INDEX IF NOT EXISTS jobs_status_idx ON jobs (status);
+CREATE INDEX IF NOT EXISTS jobs_created_at_idx ON jobs (created_at DESC);
+CREATE INDEX IF NOT EXISTS jobs_created_by_idx ON jobs (created_by);
+CREATE INDEX IF NOT EXISTS jobs_celery_task_id_idx ON jobs (celery_task_id);
 
 -- Create job progress tracking table for historical data
 CREATE TABLE IF NOT EXISTS job_progress (
@@ -56,12 +58,12 @@ CREATE TABLE IF NOT EXISTS job_progress (
     current_url TEXT,
     message TEXT,
     progress_percentage REAL NOT NULL DEFAULT 0.0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    
-    -- Indexes
-    CONSTRAINT job_progress_job_id_idx INDEX (job_id),
-    CONSTRAINT job_progress_created_at_idx INDEX (created_at DESC)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Create indexes for job_progress table
+CREATE INDEX IF NOT EXISTS job_progress_job_id_idx ON job_progress (job_id);
+CREATE INDEX IF NOT EXISTS job_progress_created_at_idx ON job_progress (created_at DESC);
 
 -- Create function to update job modified time
 CREATE OR REPLACE FUNCTION update_job_started_at()

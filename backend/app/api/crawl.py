@@ -1,15 +1,12 @@
 """Crawl management endpoints."""
 
-from typing import Dict, List, Optional
+from typing import List, Optional
 from datetime import datetime
 from uuid import UUID
-import os
-import sys
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel, HttpUrl
 import structlog
-import asyncpg
 
 from ..models.auth import User
 from ..models.jobs import (
@@ -19,14 +16,12 @@ from ..models.jobs import (
 from ..services.auth import get_current_user
 from ..services.rate_limit import RateLimitService
 from ..repositories.jobs import JobRepository
-from ..dependencies import get_job_repository, get_rate_limit_service
-from ..tasks.crawler_tasks import run_crawl_task
+from ..dependencies import get_job_repository, get_rate_limit_service, get_crawler_service
+from ..services.crawler_service import CrawlerService
 
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/crawl", tags=["crawl"])
-
-
 
 
 class CrawlRequest(BaseModel):
@@ -63,6 +58,7 @@ class TestCrawlResponse(BaseModel):
 @router.post("/start", response_model=JobResponse)
 async def start_crawl(
     request: JobCreateRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     rate_limit: RateLimitService = Depends(get_rate_limit_service),
     job_repo: JobRepository = Depends(get_job_repository),
@@ -100,26 +96,11 @@ async def start_crawl(
     # Save job to database
     job = await job_repo.create_job(job)
     
-    # Queue the task with Celery
-    celery_task = run_crawl_task.apply_async(
-        args=[
-            str(job.id),
-            job.host,
-            job.max_pages,
-            job.follow_links,
-            job.respect_robots_txt
-        ],
-        queue="crawler",
-        priority=job.priority
-    )
+    # Get crawler service from dependency
+    crawler_service = await get_crawler_service(job_repo)
     
-    # Update job with Celery task ID
-    job.celery_task_id = celery_task.id
-    job = await job_repo.update_job_status(
-        job.id, 
-        JobStatus.PENDING,
-        celery_task_id=celery_task.id
-    )
+    # Start crawl in background
+    job = await crawler_service.start_crawl(job, background_tasks)
     
     # Get queue position
     position = await job_repo.get_queue_position(job.id)
@@ -136,48 +117,24 @@ async def start_crawl(
 
 
 @router.post("/test", response_model=TestCrawlResponse)
-async def test_crawl(request: TestCrawlRequest):
+async def test_crawl(
+    request: TestCrawlRequest,
+    crawler_service: CrawlerService = Depends(get_crawler_service)
+):
     """Test endpoint to crawl a URL and get manifest directly."""
-    from urllib.parse import urlparse
-    from ..tasks.crawler_integration import CrawlerIntegration
-    
-    # Parse URL to get host
-    parsed = urlparse(request.url)
-    host = parsed.netloc
-    
-    if not host:
-        raise HTTPException(status_code=400, detail="Invalid URL")
-    
-    # Use full crawler integration for better results
-    integration = CrawlerIntegration()
-    
     try:
-        logger.info("Starting test crawl with full crawler", url=request.url, host=host)
+        logger.info("Starting test crawl", url=request.url)
         
-        # Initialize crawler
-        await integration.initialize()
-        
-        # Configure for test crawl (limited pages)
-        integration.crawler.settings.max_pages_per_host = 10
-        
-        # Run crawl
-        result = await integration.crawler.crawl_host(host)
-        
-        # Get manifest from storage
-        manifest_key = f"manifests/{host}/llm.txt"
-        manifest_content = await integration.crawler.storage.get_from_s3(manifest_key)
-        
-        if isinstance(manifest_content, bytes):
-            manifest_content = manifest_content.decode('utf-8')
+        # Run test crawl
+        result = await crawler_service.run_test_crawl(request.url)
         
         logger.info("Test crawl completed", 
-                   host=host, 
-                   pages_crawled=result["pages_crawled"],
-                   pages_changed=result["pages_changed"])
+                   host=result["host"], 
+                   pages_crawled=result["pages_crawled"])
         
         return TestCrawlResponse(
-            host=host,
-            manifest=manifest_content,
+            host=result["host"],
+            manifest=result["manifest"],
             pages_crawled=result["pages_crawled"],
             pages_changed=result["pages_changed"]
         )
@@ -185,10 +142,6 @@ async def test_crawl(request: TestCrawlRequest):
     except Exception as e:
         logger.error("Test crawl failed", url=request.url, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
-    
-    finally:
-        # Clean up
-        await integration.cleanup()
 
 
 @router.get("/status/{job_id}", response_model=JobResponse)
@@ -280,19 +233,17 @@ async def cancel_job(
             detail=f"Cannot cancel job in {job.status} state"
         )
     
-    # Cancel the Celery task if it exists
-    if job.celery_task_id:
-        from celery.result import AsyncResult
-        task = AsyncResult(job.celery_task_id)
-        task.revoke(terminate=True)
+    # Get crawler service and cancel job
+    crawler_service = await get_crawler_service(job_repo)
     
-    # Update job status
-    job = await job_repo.cancel_job(job_id)
+    # Cancel the crawl
+    success = await crawler_service.cancel_crawl(job_id)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to cancel job")
+    
+    # Get updated job
+    job = await job_repo.get_job(job_id)
     return job
 
 
-async def run_crawl(job_id: str, host: str, max_pages: int):
-    """Background task to run crawl."""
-    logger.info("Starting crawl", job_id=job_id, host=host)
-    # This would integrate with the actual crawler
-    pass

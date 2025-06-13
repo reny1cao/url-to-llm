@@ -21,9 +21,11 @@ class Settings(BaseSettings):
 
     # S3/MinIO
     s3_endpoint: str
+    s3_endpoint_url: str
     s3_access_key: str
     s3_secret_key: str
     s3_bucket: str
+    s3_region: str = "us-east-1"
     cdn_url: str = "https://cdn.example.com"
 
     # Security

@@ -108,7 +108,8 @@ async def websocket_job_updates(
         return
     
     # Get job repository
-    pool = await get_db_pool()
+    from ..repositories.jobs import JobRepository
+    pool = await get_db()
     job_repo = JobRepository(pool)
     
     # Verify user owns the job
@@ -189,7 +190,7 @@ async def websocket_notifications(
 
 
 # Helper function to send progress updates
-# This would be called from Celery tasks
+# This is called from background tasks
 async def send_progress_update(job_id: str, progress: JobProgress):
     """Send progress update to WebSocket clients."""
     message = {

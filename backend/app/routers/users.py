@@ -23,7 +23,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 class UserCreate(BaseModel):
     """User registration request."""
     email: EmailStr
-    username: str = Field(..., min_length=3, max_length=100, regex="^[a-zA-Z0-9_-]+$")
+    username: str = Field(..., min_length=3, max_length=100, pattern="^[a-zA-Z0-9_-]+$")
     password: str = Field(..., min_length=8, max_length=100)
     
     @validator('password')
@@ -54,7 +54,7 @@ class UserResponse(BaseModel):
 class UserUpdate(BaseModel):
     """User update request."""
     email: Optional[EmailStr] = None
-    username: Optional[str] = Field(None, min_length=3, max_length=100, regex="^[a-zA-Z0-9_-]+$")
+    username: Optional[str] = Field(None, min_length=3, max_length=100, pattern="^[a-zA-Z0-9_-]+$")
     is_active: Optional[bool] = None
 
 

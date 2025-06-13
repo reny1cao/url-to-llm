@@ -226,4 +226,117 @@ export const api = {
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
   },
+
+  // Documentation operations
+  async getDocumentationSites(onlyFresh?: boolean) {
+    const params = onlyFresh ? '?only_fresh=true' : ''
+    const { data } = await apiClient.get(`/agent/sites${params}`)
+    return data
+  },
+
+  async searchDocumentation(query: string, host?: string) {
+    if (host) {
+      return this.searchDocumentationSite(query, host)
+    }
+    const params = new URLSearchParams({ q: query })
+    const { data } = await apiClient.get(`/agent/search?${params}`)
+    return data
+  },
+
+  async getConsolidatedManifest(format: 'consolidated' | 'detailed' = 'consolidated') {
+    const { data } = await apiClient.get(`/agent/manifest?format=${format}`)
+    return data
+  },
+
+  async getDocumentationContent(host: string, path: string, format: 'markdown' | 'html' = 'markdown') {
+    try {
+      // Normalize path - ensure it starts with /
+      const normalizedPath = path.startsWith('/') ? path : `/${path}`
+      
+      // For root path, try both / and /index
+      const pathsToTry = normalizedPath === '/' ? ['/', '/index'] : [normalizedPath]
+      
+      let lastError = null
+      
+      for (const tryPath of pathsToTry) {
+        try {
+          // First get the metadata
+          const { data: metadata } = await apiClient.get(`/docs/${host}/page${tryPath}?format=json`)
+          
+          // Then get the actual content
+          const { data: content } = await apiClient.get(`/docs/${host}/page${tryPath}?format=${format}`, {
+            responseType: 'text'
+          })
+          
+          // Transform to match our DocumentationContent interface
+          return {
+            title: metadata.title || path,
+            description: metadata.description,
+            content: content || '',
+            format: format as 'markdown' | 'html',
+            path: metadata.path,
+            last_updated: metadata.updated_at
+          }
+        } catch (error) {
+          lastError = error
+          // Try next path
+          continue
+        }
+      }
+      
+      throw lastError
+    } catch (error) {
+      console.error('Error fetching documentation content:', error)
+      // Return a fallback structure
+      return {
+        title: path.split('/').pop() || 'Documentation',
+        description: '',
+        content: `# Page Not Found\n\nThe requested page could not be found.\n\nPath: ${path}`,
+        format: format as 'markdown' | 'html',
+        path: path,
+        last_updated: new Date().toISOString()
+      }
+    }
+  },
+
+  async triggerSiteRefresh(host: string) {
+    const { data } = await apiClient.post(`/agent/refresh/${host}`)
+    return data
+  },
+
+  async getDocumentationStats() {
+    const { data } = await apiClient.get('/agent/stats')
+    return data
+  },
+
+  async getSiteDetails(host: string) {
+    const { data } = await apiClient.get(`/docs/${host}`)
+    return data
+  },
+
+  async recrawlSite(url: string) {
+    const { data } = await apiClient.post('/docs/crawl', {
+      url,
+      max_pages: 1000,
+      follow_links: true,
+      incremental: true,
+      download_assets: true,
+      rate_limit: 0.5
+    })
+    return data
+  },
+
+  async getDocumentationNavigation(host: string) {
+    const { data } = await apiClient.get(`/docs/${host}/navigation`)
+    return data
+  },
+
+  async searchDocumentationSite(query: string, host: string, limit = 20) {
+    const params = new URLSearchParams({ 
+      q: query,
+      limit: limit.toString()
+    })
+    const { data } = await apiClient.get(`/docs/${host}/search?${params}`)
+    return data
+  },
 }

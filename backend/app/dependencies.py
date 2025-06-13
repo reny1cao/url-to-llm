@@ -74,3 +74,12 @@ async def get_auth_service(
 async def get_storage() -> StorageService:
     """Get storage service instance."""
     return StorageService()
+
+
+async def get_crawler_service(
+    job_repo: JobRepository = Depends(get_job_repository),
+    storage: StorageService = Depends(get_storage)
+) -> "CrawlerService":
+    """Get crawler service instance."""
+    from .services.crawler_service import CrawlerService
+    return CrawlerService(job_repo, storage)
