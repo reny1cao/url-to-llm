@@ -1,0 +1,1 @@
+web: cd backend && gunicorn app.main:app --bind :$PORT --workers 4 --worker-class uvicorn.workers.UvicornWorker --timeout 0 --access-logfile - --error-logfile -

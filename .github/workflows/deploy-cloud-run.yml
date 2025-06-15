@@ -1,0 +1,111 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+  SERVICE_NAME: url-to-llm
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+
+    - name: Configure Docker for Artifact Registry
+      run: gcloud auth configure-docker
+
+    - name: Build and push backend image
+      run: |
+        docker build -t gcr.io/$PROJECT_ID/url-to-llm-backend:$GITHUB_SHA \
+          -f backend/Dockerfile.cloudrun ./backend
+        docker push gcr.io/$PROJECT_ID/url-to-llm-backend:$GITHUB_SHA
+
+    - name: Build and push frontend image
+      run: |
+        docker build -t gcr.io/$PROJECT_ID/url-to-llm-frontend:$GITHUB_SHA \
+          -f frontend/Dockerfile.cloudrun \
+          --build-arg NEXT_PUBLIC_API_URL=https://api-${SERVICE_NAME}-${REGION}-${PROJECT_ID}.a.run.app \
+          ./frontend
+        docker push gcr.io/$PROJECT_ID/url-to-llm-frontend:$GITHUB_SHA
+
+    - name: Run database migrations
+      run: |
+        gcloud run jobs create migrate-$GITHUB_SHA \
+          --image gcr.io/$PROJECT_ID/url-to-llm-backend:$GITHUB_SHA \
+          --region $REGION \
+          --set-cloudsql-instances ${{ secrets.DB_CONNECTION_NAME }} \
+          --set-secrets DATABASE_URL=${{ secrets.DATABASE_SECRET }}:latest \
+          --command alembic,upgrade,head \
+          --max-retries 3 \
+          --wait
+
+    - name: Deploy backend to Cloud Run
+      run: |
+        gcloud run deploy api-${SERVICE_NAME} \
+          --image gcr.io/$PROJECT_ID/url-to-llm-backend:$GITHUB_SHA \
+          --region $REGION \
+          --platform managed \
+          --allow-unauthenticated \
+          --add-cloudsql-instances ${{ secrets.DB_CONNECTION_NAME }} \
+          --set-env-vars INSTANCE_CONNECTION_NAME=${{ secrets.DB_CONNECTION_NAME }} \
+          --set-secrets "DATABASE_URL=${{ secrets.DATABASE_SECRET }}:latest,SECRET_KEY=${{ secrets.SECRET_KEY_SECRET }}:latest,REDIS_URL=${{ secrets.REDIS_URL_SECRET }}:latest,GCS_BUCKET=${{ secrets.GCS_BUCKET_SECRET }}:latest" \
+          --service-account ${{ secrets.SERVICE_ACCOUNT }} \
+          --memory 2Gi \
+          --cpu 2 \
+          --timeout 900 \
+          --concurrency 100 \
+          --min-instances 1 \
+          --max-instances 10
+
+    - name: Deploy frontend to Cloud Run
+      run: |
+        gcloud run deploy web-${SERVICE_NAME} \
+          --image gcr.io/$PROJECT_ID/url-to-llm-frontend:$GITHUB_SHA \
+          --region $REGION \
+          --platform managed \
+          --allow-unauthenticated \
+          --memory 512Mi \
+          --cpu 1 \
+          --timeout 60 \
+          --concurrency 100 \
+          --min-instances 1 \
+          --max-instances 5
+
+    - name: Get service URLs
+      run: |
+        API_URL=$(gcloud run services describe api-${SERVICE_NAME} --region $REGION --format 'value(status.url)')
+        WEB_URL=$(gcloud run services describe web-${SERVICE_NAME} --region $REGION --format 'value(status.url)')
+        echo "API deployed to: $API_URL"
+        echo "Web deployed to: $WEB_URL"
+        echo "API_URL=$API_URL" >> $GITHUB_ENV
+        echo "WEB_URL=$WEB_URL" >> $GITHUB_ENV
+
+    - name: Run smoke tests
+      run: |
+        # Test API health endpoint
+        curl -f $API_URL/api/health || exit 1
+        
+        # Test frontend
+        curl -f $WEB_URL || exit 1
+        
+        echo "✅ Deployment successful!"

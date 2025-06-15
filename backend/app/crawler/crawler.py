@@ -239,26 +239,146 @@ class WebCrawler:
                 deduplicate=True,
                 include_images=False,
                 include_tables=True,
-                favor_precision=False  # Balance between precision and recall
+                favor_precision=False,  # Balance between precision and recall
+                config=trafilatura.settings.use_config()  # Use default config with code block support
             )
             
             if trafilatura_content:
-                # Clean up the content a bit
+                # Clean up the content more carefully
+                # Remove excessive empty lines but preserve formatting
                 lines = trafilatura_content.split('\n')
                 cleaned_lines = []
+                empty_line_count = 0
                 
                 for line in lines:
-                    line = line.strip()
-                    if line:
+                    # Don't strip the line - preserve indentation
+                    if line.strip():  # Line has content
+                        # Add back a single empty line if we had multiple
+                        if empty_line_count > 0:
+                            cleaned_lines.append('')
                         cleaned_lines.append(line)
+                        empty_line_count = 0
+                    else:  # Empty line
+                        empty_line_count += 1
                 
-                # Join with proper spacing
-                trafilatura_content = '\n\n'.join(cleaned_lines)
+                # Join back with single newlines
+                trafilatura_content = '\n'.join(cleaned_lines)
+                
+                # Post-process to fix common formatting issues
+                import re
+                
+                # Fix Trafilatura's broken sentence formatting
+                # These are based on actual issues found in comprehensive testing
+                
+                # 1. Fix ALL punctuation after inline code (most common issue)
+                # Handles: `code`\n\n. or `code`\n\n, etc.
+                trafilatura_content = re.sub(r'`\n\n([,\.;:!?\)])', r'`\1', trafilatura_content)
+                
+                # 2. Fix orphaned punctuation at start of lines
+                # Handles: \n\n. Text or \n\n, text
+                trafilatura_content = re.sub(r'\n\n([,\.;:!?])\s*', r'\1 ', trafilatura_content)
+                
+                # 3. Fix inline code breaking word flow
+                # Handles: `int`\n\nand `float` -> `int` and `float`
+                trafilatura_content = re.sub(r'`\n\n(and|or|but|with|to|from|in|on|at|for|of|as|by)\s+`', r'` \1 `', trafilatura_content)
+                
+                # 4. Fix broken sentences after closing parentheses or brackets
+                trafilatura_content = re.sub(r'([)\]])\n\n([a-z])', r'\1 \2', trafilatura_content)
+                
+                # 5. Fix specific patterns that are clearly errors
+                # When a line ends with common continuing words
+                continuing_words = r'(the|a|an|and|or|but|with|in|on|at|to|for|of|as|by|from|that|which|who|when|where|if|then|than|is|are|was|were|have|has|had)'
+                trafilatura_content = re.sub(rf'\b{continuing_words}\n\n([a-z])', r'\1 \2', trafilatura_content, flags=re.IGNORECASE)
+                
+                # 6. Fix code comments breaking flow
+                # Handles: /* comment */\n\n.classname
+                trafilatura_content = re.sub(r'(\*/)`?\n\n([\.#\w])', r'\1 \2', trafilatura_content)
+                # Also fix when it's inside backticks
+                trafilatura_content = re.sub(r'(\*/`)\n\n([\.#\w])', r'\1 \2', trafilatura_content)
+                
+                # 7. Ensure proper spacing after headings (safe - only adds spacing)
+                trafilatura_content = re.sub(r'^(#{1,6}\s+[^\n]+)([A-Z][a-z])', r'\1\n\n\2', trafilatura_content, flags=re.MULTILINE)
+                
+                # 8. Fix numbered lists where number is separated from content
+                # Handles: 1.\n\nContent -> 1. Content
+                trafilatura_content = re.sub(r'^(\d+\.)\n\n([A-Z])', r'\1 \2', trafilatura_content, flags=re.MULTILINE)
+                
+                # 9. Fix cases where short words/numbers are orphaned
+                # Handles: is\n2. or is\na 
+                trafilatura_content = re.sub(r'\b(is|are|was|were|be|been|has|have|had|do|does|did)\n\n?([a-z0-9])', r'\1 \2', trafilatura_content, flags=re.IGNORECASE)
+                
+                # Fix code blocks that got merged with text
+                # Look for patterns like "import { ... } from 'package'export" and add newlines
+                trafilatura_content = re.sub(r"(import\s*{[^}]+}\s*from\s*['\"][^'\"]+['\"])([a-zA-Z])", r'\1\n\n\2', trafilatura_content)
+                # Also handle other common code patterns
+                trafilatura_content = re.sub(r"(}\s*\)\s*)(import|export|const|let|var|function)", r'\1\n\n\2', trafilatura_content)
+                # Fix inline code that should be code blocks
+                trafilatura_content = re.sub(r'`(yarn add [^`]+)`', r'```bash\n\1\n```', trafilatura_content)
+                trafilatura_content = re.sub(r'`(npm install [^`]+)`', r'```bash\n\1\n```', trafilatura_content)
                 
                 # Limit size if needed
                 max_size = 20000
                 if len(trafilatura_content) > max_size:
                     trafilatura_content = trafilatura_content[:max_size] + "\n\n[Content truncated...]"
+                
+                # Check if there's likely code that should be in code blocks
+                # Look for common code patterns not wrapped in ```
+                code_patterns = [
+                    r'import\s*{[^}]+}\s*from',
+                    r'export\s+(default|const|function|class)',
+                    r'const\s+\w+\s*=',
+                    r'function\s+\w+\s*\(',
+                ]
+                
+                likely_has_unwrapped_code = False
+                for pattern in code_patterns:
+                    if re.search(pattern, trafilatura_content):
+                        # Check if this code is outside of code blocks
+                        for match in re.finditer(pattern, trafilatura_content):
+                            # Get text before match to count ``` 
+                            text_before = trafilatura_content[:match.start()]
+                            # If odd number of ``` before, we're inside a code block
+                            if text_before.count('```') % 2 == 0:
+                                likely_has_unwrapped_code = True
+                                break
+                
+                if likely_has_unwrapped_code:
+                    logger.info("Detected likely unwrapped code, wrapping in code blocks")
+                    
+                    # Try to wrap obvious code blocks
+                    # First check if import is already in a code block
+                    imports_to_wrap = []
+                    for match in re.finditer(r'import\s*{[^}]+}\s*from\s*[\'"][^\'\"]+[\'"]', trafilatura_content):
+                        # Check if this import is already in a code block
+                        text_before = trafilatura_content[:match.start()]
+                        if text_before.count('```') % 2 == 0:  # Even number means we're outside code blocks
+                            imports_to_wrap.append(match)
+                    
+                    # Work backwards to avoid messing up indices
+                    for match in reversed(imports_to_wrap):
+                        import_text = match.group(0)
+                        start = match.start()
+                        end = match.end()
+                        
+                        # Look for export statement right after
+                        remaining = trafilatura_content[end:]
+                        export_match = re.match(r'\s*(export\s+default[^;{\n]+)', remaining)
+                        
+                        if export_match:
+                            # Wrap import + export together
+                            full_code = import_text + '\n' + export_match.group(1).strip()
+                            trafilatura_content = (
+                                trafilatura_content[:start] + 
+                                '```javascript\n' + full_code + '\n```' +
+                                trafilatura_content[end + export_match.end():]
+                            )
+                        else:
+                            # Just wrap the import
+                            trafilatura_content = (
+                                trafilatura_content[:start] + 
+                                '```javascript\n' + import_text + '\n```' +
+                                trafilatura_content[end:]
+                            )
                 
                 logger.info("Successfully extracted content with Trafilatura", 
                            content_length=len(trafilatura_content))
@@ -335,21 +455,39 @@ class WebCrawler:
         content_parts = []
         
         # Process elements in order, preserving structure
-        for element in main_content.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'ul', 'ol', 'blockquote', 'pre']):
+        # Track processed elements to avoid duplicates
+        processed = set()
+        
+        for element in main_content.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'ul', 'ol', 'blockquote', 'pre', 'code', 'div']):
+            # Skip if already processed
+            if element in processed:
+                continue
+                
+            # Skip if this element is inside a pre tag (already processed)
+            if element.name == 'code' and element.find_parent('pre'):
+                continue
+                
             text = element.get_text(strip=True)
             
-            if not text or len(text) < 10:  # Skip very short snippets
+            # For code/pre elements, get raw text
+            if element.name in ['pre', 'code']:
+                text = element.get_text(strip=False)  # Preserve formatting
+            
+            if not text or (element.name not in ['pre', 'code'] and len(text) < 10):  # Skip very short snippets except code
                 continue
             
-            # Clean up whitespace
-            text = ' '.join(text.split())
+            # Clean up whitespace for non-code elements
+            if element.name not in ['pre', 'code']:
+                text = ' '.join(text.split())
             
             # Format based on element type
             if element.name.startswith('h'):
                 # Add spacing around headings
+                level = int(element.name[1])
+                heading_prefix = '#' * level
                 if content_parts:
                     content_parts.append("")  # Empty line before heading
-                content_parts.append(text)
+                content_parts.append(f"{heading_prefix} {text}")
                 content_parts.append("")  # Empty line after heading
             elif element.name in ['ul', 'ol']:
                 # Format lists
@@ -365,11 +503,31 @@ class WebCrawler:
                 content_parts.append(f"> {text}")
                 content_parts.append("")
             elif element.name == 'pre':
-                # Preserve code blocks
-                content_parts.append("```")
-                content_parts.append(text)
+                # Preserve code blocks with language detection
+                code_elem = element.find('code')
+                lang = ''
+                if code_elem and 'class' in code_elem.attrs:
+                    classes = code_elem.get('class', [])
+                    for cls in classes:
+                        if cls.startswith('language-'):
+                            lang = cls.replace('language-', '')
+                            break
+                
+                content_parts.append(f"```{lang}")
+                content_parts.append(text.strip())
                 content_parts.append("```")
                 content_parts.append("")
+                # Mark all children as processed
+                for child in element.find_all():
+                    processed.add(child)
+            elif element.name == 'code':
+                # Inline code
+                content_parts.append(f"`{text}`")
+            elif element.name == 'div':
+                # Only include divs with substantial content
+                if len(text) > 50:
+                    content_parts.append(text)
+                    content_parts.append("")
             else:
                 # Regular paragraphs
                 content_parts.append(text)

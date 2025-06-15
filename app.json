@@ -1,0 +1,39 @@
+{
+  "name": "url-to-llm",
+  "description": "Convert any website into clean, LLM-ready markdown",
+  "repository": "https://github.com/reny1cao/url-to-llm",
+  "logo": "https://github.com/reny1cao/url-to-llm/blob/main/logo.png",
+  "keywords": ["web-scraping", "llm", "markdown", "fastapi", "nextjs"],
+  "env": {
+    "SECRET_KEY": {
+      "description": "Secret key for JWT signing",
+      "generator": "secret",
+      "required": true
+    },
+    "DATABASE_URL": {
+      "description": "PostgreSQL connection string",
+      "required": true
+    },
+    "REDIS_URL": {
+      "description": "Redis connection string",
+      "required": true
+    },
+    "GCS_BUCKET": {
+      "description": "Google Cloud Storage bucket name",
+      "required": true
+    },
+    "STORAGE_BACKEND": {
+      "description": "Storage backend type",
+      "value": "gcs"
+    }
+  },
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "free"
+    }
+  },
+  "addons": [],
+  "buildpacks": [],
+  "stack": "container"
+}
