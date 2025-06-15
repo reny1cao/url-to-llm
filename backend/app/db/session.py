@@ -16,8 +16,8 @@ async def get_db_pool() -> asyncpg.Pool:
     if _db_pool is None:
         _db_pool = await asyncpg.create_pool(
             settings.database_url,
-            min_size=10,
-            max_size=20,
+            min_size=1,
+            max_size=2,
             command_timeout=60
         )
     
