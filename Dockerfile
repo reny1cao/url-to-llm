@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir \
     gunicorn
 
 # Copy backend application code
-COPY backend/ .
+COPY backend/ ./
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
@@ -38,7 +38,7 @@ EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8080/api/health || exit 1
+    CMD curl -f http://localhost:8080/health || exit 1
 
 # Use gunicorn for production with uvicorn workers
 CMD exec gunicorn app.main:app \
