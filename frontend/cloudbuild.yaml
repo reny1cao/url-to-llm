@@ -1,0 +1,11 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_API_URL=https://url-to-llm-857813849242.asia-southeast1.run.app'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/url-to-llm-frontend'
+      - '.'
+images:
+  - 'gcr.io/$PROJECT_ID/url-to-llm-frontend'
