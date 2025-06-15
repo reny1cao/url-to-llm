@@ -1,5 +1,5 @@
 # Frontend Dockerfile optimized for Cloud Run
-FROM node:18-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 
 # Install dependencies
@@ -12,7 +12,7 @@ RUN \
   fi
 
 # Build stage
-FROM node:18-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -30,7 +30,7 @@ RUN \
   fi
 
 # Production stage
-FROM node:18-alpine AS runner
+FROM node:24-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV production
