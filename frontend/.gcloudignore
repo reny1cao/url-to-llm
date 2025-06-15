@@ -1,0 +1,22 @@
+# Ignore node_modules and other unnecessary files
+node_modules/
+.next/
+out/
+.git/
+.gitignore
+*.log
+.DS_Store
+.env.local
+.env.*.local
+coverage/
+.nyc_output/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cache/
+dist/
+build/
+tmp/
+temp/

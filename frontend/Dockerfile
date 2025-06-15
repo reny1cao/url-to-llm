@@ -1,10 +1,15 @@
-# Frontend Dockerfile for production
+# Frontend Dockerfile optimized for Cloud Run
 FROM node:18-alpine AS deps
 WORKDIR /app
 
 # Install dependencies
-COPY package.json pnpm-lock.yaml ./
-RUN npm install -g pnpm && pnpm install --frozen-lockfile
+COPY package.json pnpm-lock.yaml* package-lock.json* yarn.lock* ./
+RUN \
+  if [ -f pnpm-lock.yaml ]; then npm install -g pnpm && pnpm install --frozen-lockfile; \
+  elif [ -f yarn.lock ]; then yarn --frozen-lockfile; \
+  elif [ -f package-lock.json ]; then npm ci; \
+  else echo "No lockfile found." && npm install; \
+  fi
 
 # Build stage
 FROM node:18-alpine AS builder
@@ -13,12 +18,16 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Build arguments
+# Build arguments for API URL
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 # Build the application
-RUN npm install -g pnpm && pnpm build
+RUN \
+  if [ -f pnpm-lock.yaml ]; then npm install -g pnpm && pnpm build; \
+  elif [ -f yarn.lock ]; then yarn build; \
+  else npm run build; \
+  fi
 
 # Production stage
 FROM node:18-alpine AS runner
@@ -32,15 +41,18 @@ RUN adduser -S nextjs -u 1001
 
 # Copy necessary files
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/package.json ./package.json
+
+# Standalone build for Cloud Run
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 USER nextjs
 
-EXPOSE 3000
+# Cloud Run port
+ENV PORT 8080
+EXPOSE 8080
 
-ENV PORT 3000
 ENV HOSTNAME "0.0.0.0"
 
 CMD ["node", "server.js"]
-EOF < /dev/null
