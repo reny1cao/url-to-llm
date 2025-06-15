@@ -14,7 +14,7 @@ redis==4.5.4
 aioboto3==12.1.0
 
 # Authentication
-python-jose[cryptography]==3.3.0
+python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 
 # Crawler
