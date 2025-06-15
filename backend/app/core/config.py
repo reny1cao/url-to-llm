@@ -1,5 +1,6 @@
 """Application configuration."""
 
+import os
 from typing import List, Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -40,7 +41,10 @@ class Settings(BaseSettings):
     allowed_redirect_uris: List[str] = ["http://localhost:3000/auth/callback"]
 
     # CORS
-    allowed_origins: List[str] = ["http://localhost:3000"]
+    allowed_origins: List[str] = [
+        "http://localhost:3000",
+        "https://url-to-llm-frontend-857813849242.asia-southeast1.run.app"
+    ]
 
     # Rate limiting
     rate_limit_per_minute: int = 120
