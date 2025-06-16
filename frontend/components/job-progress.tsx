@@ -42,7 +42,12 @@ export function JobProgress({ jobId, token }: JobProgressProps) {
   const [progressHistory, setProgressHistory] = useState<JobProgress[]>([]);
 
   const { isConnected } = useWebSocket({
-    url: `${process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000'}/ws/jobs/${jobId}`,
+    url: (() => {
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      const wsProtocol = baseUrl.startsWith('https') ? 'wss' : 'ws'
+      const wsHost = baseUrl.replace(/^https?:\/\//, '')
+      return `${wsProtocol}://${wsHost}/ws/jobs/${jobId}`
+    })(),
     token,
     onMessage: (message) => {
       switch (message.type) {

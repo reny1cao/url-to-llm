@@ -33,7 +33,11 @@ export function useCrawlProgress(host: string | null) {
       wsRef.current = null
     }
 
-    const wsUrl = `ws://localhost:8000/ws/crawl/${host}`
+    // Get base URL from environment or window location
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const wsProtocol = baseUrl.startsWith('https') ? 'wss' : 'ws'
+    const wsHost = baseUrl.replace(/^https?:\/\//, '')
+    const wsUrl = `${wsProtocol}://${wsHost}/ws/crawl/${host}`
     const ws = new WebSocket(wsUrl)
 
     ws.onopen = () => {
