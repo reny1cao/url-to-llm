@@ -34,6 +34,13 @@ class S3Client:
         self.bucket_name = settings.s3_bucket
         self.region = settings.s3_region
         
+        # Check if we're using GCS instead
+        if settings.s3_endpoint_url == "dummy" and hasattr(settings, 'gcs_bucket'):
+            # Use GCS S3-compatible API
+            self.endpoint_url = "https://storage.googleapis.com"
+            self.bucket_name = settings.gcs_bucket
+            logger.info("Using GCS S3-compatible API", bucket=self.bucket_name)
+        
         # Initialize session
         self.session = aioboto3.Session()
         

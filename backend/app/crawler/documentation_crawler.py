@@ -381,20 +381,27 @@ class DocumentationCrawler(WebCrawler):
         # Normalize path to avoid double slashes
         normalized_path = path.rstrip('/') if path != '/' else ''
         html_key = f"sites/{self.site['host']}/pages{normalized_path}/index.html"
-        await self.s3_client.upload_content(
-            html_content.encode('utf-8'),
-            html_key,
-            content_type='text/html'
-        )
-        
-        # Store markdown in S3
         markdown_key = f"sites/{self.site['host']}/pages{normalized_path}/content.md"
-        if markdown_content:
+        
+        try:
             await self.s3_client.upload_content(
-                markdown_content.encode('utf-8'),
-                markdown_key,
-                content_type='text/markdown'
+                html_content.encode('utf-8'),
+                html_key,
+                content_type='text/html'
             )
+            
+            # Store markdown in S3
+            if markdown_content:
+                await self.s3_client.upload_content(
+                    markdown_content.encode('utf-8'),
+                    markdown_key,
+                    content_type='text/markdown'
+                )
+        except Exception as e:
+            logger.warning("Failed to upload to S3, storing inline", error=str(e))
+            # Store content inline in database as fallback
+            html_key = None
+            markdown_key = None
         
         # Create or update page
         if existing_page:
